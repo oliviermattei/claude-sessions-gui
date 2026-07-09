@@ -7,7 +7,7 @@ defineEmits<{ close: [] }>();
 
 const { launchers, defaultLauncherId, addLauncher, removeLauncher, resetLaunchers } =
   useSettings();
-const { accent, theme } = useTheme();
+const { accent, theme, layout } = useTheme();
 
 const ACCENTS = ["#d97757", "#8a63d2", "#2a78d6", "#1f8a5b"];
 
@@ -64,6 +64,28 @@ const NAV: { key: Section; label: string }[] = [
                   @click="accent = a"
                 />
               </div>
+            </section>
+            <section>
+              <h3>Layout</h3>
+              <div class="segmented">
+                <button
+                  :class="{ on: layout === 'comfortable' }"
+                  @click="layout = 'comfortable'"
+                >
+                  Comfortable
+                </button>
+                <button
+                  :class="{ on: layout === 'compact' }"
+                  @click="layout = 'compact'"
+                >
+                  Compact
+                </button>
+              </div>
+              <p class="hint layout-hint">
+                <strong>Comfortable</strong> keeps the two-pane view. <strong>Compact</strong>
+                folds every project into a single accordion tree — click a project to reveal
+                its sessions underneath.
+              </p>
             </section>
           </template>
 
@@ -250,6 +272,9 @@ section h3 {
   font-size: 12px;
   color: var(--dim);
   line-height: 1.5;
+}
+.layout-hint {
+  margin: 10px 0 0;
 }
 .hint code {
   font-family: var(--mono);

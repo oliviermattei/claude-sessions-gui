@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { ref, computed, watch } from "vue";
+import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import type { Grouping, SortKey, Session } from "./types";
 import { useSessions } from "./composables/useSessions";
 import { useSettings } from "./composables/useSettings";
@@ -12,13 +13,35 @@ import SessionRow from "./components/SessionRow.vue";
 import EmptyState from "./components/EmptyState.vue";
 import Toast from "./components/Toast.vue";
 import SettingsModal from "./components/SettingsModal.vue";
+import CompactView from "./components/CompactView.vue";
+import { useTheme } from "./composables/useTheme";
 
 const { sessions, loading, error, reload } = useSessions();
 const { resume } = useSettings();
+const { layout } = useTheme();
+
+// Compact mode lets the window collapse down to just the tree pane (~30% of the
+// default width); comfortable keeps the roomier two-pane minimum.
+watch(
+  layout,
+  (mode) => {
+    const min = mode === "compact" ? new LogicalSize(360, 560) : new LogicalSize(880, 560);
+    getCurrentWindow()
+      .setMinSize(min)
+      .catch(() => {
+        /* no-op outside the Tauri runtime (e.g. vite preview) */
+      });
+  },
+  { immediate: true },
+);
 
 const query = ref("");
 const grouping = ref<Grouping>("none");
 const sort = ref<SortKey>("recentUpdated");
+// Compact view keeps its own group/sort so switching layouts doesn't disturb
+// the comfortable defaults. Compact defaults to a project accordion.
+const compactGrouping = ref<Grouping>("project");
+const compactSort = ref<SortKey>("recentUpdated");
 const projectFilter = ref<string | null>(null); // stores the project path
 const selectedId = ref<string | null>(null);
 const settingsOpen = ref(false);
@@ -145,7 +168,27 @@ async function onResume(s: Session) {
   <div class="app">
     <TitleBar />
 
-    <div class="workspace">
+    <div v-if="layout === 'compact'" class="workspace compact-workspace">
+      <CompactView
+        v-model:query="query"
+        v-model:grouping="compactGrouping"
+        v-model:sort="compactSort"
+        :sessions="sessions"
+        :selected-id="selectedId"
+        @select="selectedId = $event"
+        @resume="onResume"
+        @reload="reload"
+        @open-settings="settingsOpen = true"
+      />
+      <div class="viz-pane">
+        <div class="viz-empty">
+          <span>Select a session</span>
+          <small>The preview will show up here.</small>
+        </div>
+      </div>
+    </div>
+
+    <div v-else class="workspace">
       <Sidebar
         :projects="projectList"
         :active-project="projectFilter"
@@ -218,7 +261,36 @@ async function onResume(s: Session) {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 244px 1fr;
+  grid-template-columns: 264px 1fr;
+}
+.compact-workspace {
+  grid-template-columns: 320px 1fr;
+}
+.viz-pane {
+  min-width: 0;
+  min-height: 0;
+  border-left: 1px solid var(--bd);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.viz-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  color: var(--faint);
+  text-align: center;
+  padding: 24px;
+}
+.viz-empty span {
+  font-size: 14px;
+  font-weight: 550;
+  color: var(--dim);
+}
+.viz-empty small {
+  font-size: 12px;
 }
 .main {
   display: flex;
