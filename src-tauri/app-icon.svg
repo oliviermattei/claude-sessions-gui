@@ -1,0 +1,9 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- Rounded-square background in the app accent color -->
+  <rect x="0" y="0" width="1024" height="1024" rx="236" ry="236" fill="#d97757"/>
+  <!-- Terminal prompt glyph ">_" drawn as vector paths (no font dependency) -->
+  <g fill="none" stroke="#ffffff" stroke-width="74" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="372,384 548,512 372,640"/>
+  </g>
+  <rect x="576" y="600" width="196" height="66" rx="33" ry="33" fill="#ffffff"/>
+</svg>

@@ -1,0 +1,100 @@
+/* Design tokens — ported verbatim from the Claude Design prototype.
+   Accent-derived colors use color-mix() so the accent stays swappable. */
+
+:root {
+  --acc: #d97757;
+  --acc-tx: #ffffff;
+
+  /* dark theme (default) */
+  --bg: #0b0b0d;
+  --panel: #101013;
+  --panel2: #17171c;
+  --hover: #1b1b22;
+  --sel: #20202a;
+  --bd: rgba(255, 255, 255, 0.07);
+  --bd2: rgba(255, 255, 255, 0.12);
+  --tx: #ececef;
+  --dim: #9b9ba4;
+  --faint: #66666f;
+
+  --acc-soft: color-mix(in srgb, var(--acc) 16%, transparent);
+  --mark: color-mix(in srgb, var(--acc) 32%, transparent);
+
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+:root[data-theme="light"] {
+  --bg: #ffffff;
+  --panel: #f6f6f4;
+  --panel2: #ffffff;
+  --hover: #f0efeb;
+  --sel: #eae7e1;
+  --bd: rgba(0, 0, 0, 0.08);
+  --bd2: rgba(0, 0, 0, 0.13);
+  --tx: #1b1b1d;
+  --dim: #6a6a72;
+  --faint: #a0a09f;
+
+  --acc-soft: color-mix(in srgb, var(--acc) 12%, transparent);
+  --mark: color-mix(in srgb, var(--acc) 34%, transparent);
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--tx);
+  overflow: hidden;
+}
+
+#app {
+  height: 100vh;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--bd2);
+  border-radius: 8px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--faint);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+input {
+  outline: none;
+  font-family: inherit;
+}
+input::placeholder {
+  color: var(--faint);
+}
+
+button {
+  font-family: inherit;
+}
+
+mark {
+  background: var(--mark);
+  color: var(--tx);
+  border-radius: 3px;
+  padding: 0 1px;
+  font-weight: 700;
+}
