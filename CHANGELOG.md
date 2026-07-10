@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-07-10
+
+### Changed
+
+- Mise à jour des dépendances internes : `dirs` 5→6 (backend Rust), `vue-tsc`
+  2→3, `@vitejs/plugin-vue` 5→6, et actions GitHub CI (checkout, setup-node,
+  pnpm/action-setup, upload-artifact). Aucun changement fonctionnel visible.
+
 ## [0.2.0] - 2026-07-10
 
 ### Added
@@ -36,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-platform release workflow producing installers for Windows, macOS
   (arm64 + x64) and Linux (x86_64 + arm64).
 
-[Unreleased]: https://github.com/oliviermattei/claude-sessions-gui/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/oliviermattei/claude-sessions-gui/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/oliviermattei/claude-sessions-gui/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/oliviermattei/claude-sessions-gui/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/oliviermattei/claude-sessions-gui/releases/tag/v0.1.0
