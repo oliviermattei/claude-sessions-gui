@@ -20,6 +20,17 @@
   --acc-soft: color-mix(in srgb, var(--acc) 16%, transparent);
   --mark: color-mix(in srgb, var(--acc) 32%, transparent);
 
+  /* diff + syntax highlighting (dark) */
+  --diff-add-bg: color-mix(in srgb, #4ec98a 15%, transparent);
+  --diff-add-tx: #7ee0a8;
+  --diff-del-bg: color-mix(in srgb, #e06c5b 15%, transparent);
+  --diff-del-tx: #f0928a;
+  --hl-kw: #e0709a;
+  --hl-str: #9ece6a;
+  --hl-num: #e5a06a;
+  --hl-fn: #7aa2f7;
+  --hl-var: #7dcfff;
+
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
@@ -38,6 +49,67 @@
 
   --acc-soft: color-mix(in srgb, var(--acc) 12%, transparent);
   --mark: color-mix(in srgb, var(--acc) 34%, transparent);
+
+  /* diff + syntax highlighting (light) */
+  --diff-add-bg: color-mix(in srgb, #2a9d63 14%, transparent);
+  --diff-add-tx: #1f7a49;
+  --diff-del-bg: color-mix(in srgb, #d0402f 12%, transparent);
+  --diff-del-tx: #b23122;
+  --hl-kw: #a626a4;
+  --hl-str: #50a14f;
+  --hl-num: #b76b01;
+  --hl-fn: #4078f2;
+  --hl-var: #0184bc;
+}
+
+/* highlight.js token colors, mapped onto theme vars so code reads in both modes */
+.hljs {
+  color: var(--tx);
+  background: transparent;
+}
+.hljs-comment,
+.hljs-quote {
+  color: var(--faint);
+  font-style: italic;
+}
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-built_in,
+.hljs-name,
+.hljs-tag,
+.hljs-literal {
+  color: var(--hl-kw);
+}
+.hljs-string,
+.hljs-attr,
+.hljs-template-tag,
+.hljs-addition,
+.hljs-regexp {
+  color: var(--hl-str);
+}
+.hljs-number,
+.hljs-type,
+.hljs-params,
+.hljs-meta {
+  color: var(--hl-num);
+}
+.hljs-title,
+.hljs-section,
+.hljs-symbol,
+.hljs-selector-id,
+.hljs-selector-class {
+  color: var(--hl-fn);
+}
+.hljs-variable,
+.hljs-property,
+.hljs-attribute {
+  color: var(--hl-var);
+}
+.hljs-emphasis {
+  font-style: italic;
+}
+.hljs-strong {
+  font-weight: 700;
 }
 
 html,
@@ -52,7 +124,7 @@ body {
 
 body {
   font-family: var(--font);
-  background: var(--bg);
+  background: transparent;
   color: var(--tx);
   overflow: hidden;
 }

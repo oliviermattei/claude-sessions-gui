@@ -2,23 +2,32 @@
 import { ref, onMounted } from "vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
-const win = getCurrentWindow();
+// getCurrentWindow() throws outside the Tauri runtime (browser / vite preview).
+const win = (() => {
+  try {
+    return getCurrentWindow();
+  } catch {
+    return null;
+  }
+})();
 const maximized = ref(false);
 
 async function refreshMaximized() {
-  maximized.value = await win.isMaximized();
+  if (win) maximized.value = await win.isMaximized();
 }
 onMounted(() => {
+  if (!win) return;
   refreshMaximized();
   win.onResized(refreshMaximized);
 });
 
-const minimize = () => win.minimize();
+const minimize = () => win?.minimize();
 const toggleMax = async () => {
+  if (!win) return;
   await win.toggleMaximize();
   refreshMaximized();
 };
-const close = () => win.close();
+const close = () => win?.close();
 </script>
 
 <template>
@@ -26,7 +35,6 @@ const close = () => win.close();
     <div class="left" data-tauri-drag-region>
       <div class="glyph">&gt;_</div>
       <span class="name">Claude Sessions</span>
-      <span class="ver">v0.1 · local</span>
     </div>
 
     <div class="controls">
@@ -88,11 +96,8 @@ const close = () => win.close();
   font-weight: 600;
   letter-spacing: -0.2px;
   color: var(--tx);
-}
-.ver {
-  font-size: 11px;
-  color: var(--faint);
-  font-family: var(--mono);
+  white-space: nowrap;
+  flex: none;
 }
 
 .controls {

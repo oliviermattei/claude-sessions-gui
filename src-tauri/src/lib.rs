@@ -199,6 +199,210 @@ fn parse_session(path: &Path) -> Option<Session> {
     })
 }
 
+// --- Transcript reading (iteration 3: "Lire") -------------------------------
+
+/// A single content block inside a message. Tagged by `kind` for the frontend's
+/// discriminated union.
+#[derive(Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+enum Block {
+    Text {
+        text: String,
+    },
+    Thinking {
+        text: String,
+    },
+    ToolUse {
+        id: String,
+        name: String,
+        input: serde_json::Value,
+    },
+    ToolResult {
+        #[serde(rename = "toolUseId")]
+        tool_use_id: String,
+        text: String,
+        #[serde(rename = "isError")]
+        is_error: bool,
+    },
+}
+
+#[derive(Serialize)]
+struct Message {
+    role: String, // "user" | "assistant"
+    ts: i64,      // timestamp ms (0 if missing)
+    blocks: Vec<Block>,
+}
+
+#[derive(Serialize)]
+struct Subagent {
+    id: String,
+    messages: Vec<Message>,
+}
+
+#[derive(Serialize)]
+struct Transcript {
+    messages: Vec<Message>,
+    subagents: Vec<Subagent>,
+}
+
+/// Flatten a message `content` (string or array of blocks) into UI blocks.
+fn content_to_blocks(content: &serde_json::Value) -> Vec<Block> {
+    let mut blocks = Vec::new();
+
+    if let Some(s) = content.as_str() {
+        if !s.trim().is_empty() {
+            blocks.push(Block::Text { text: s.to_string() });
+        }
+        return blocks;
+    }
+
+    let Some(arr) = content.as_array() else {
+        return blocks;
+    };
+    for b in arr {
+        match b.get("type").and_then(|t| t.as_str()).unwrap_or("") {
+            "text" => {
+                if let Some(t) = b.get("text").and_then(|x| x.as_str()) {
+                    blocks.push(Block::Text { text: t.to_string() });
+                }
+            }
+            "thinking" => {
+                if let Some(t) = b.get("thinking").and_then(|x| x.as_str()) {
+                    blocks.push(Block::Thinking { text: t.to_string() });
+                }
+            }
+            "tool_use" => {
+                blocks.push(Block::ToolUse {
+                    id: b.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                    name: b.get("name").and_then(|x| x.as_str()).unwrap_or("tool").to_string(),
+                    input: b.get("input").cloned().unwrap_or(serde_json::Value::Null),
+                });
+            }
+            "tool_result" => {
+                blocks.push(Block::ToolResult {
+                    tool_use_id: b
+                        .get("tool_use_id")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    text: tool_result_text(b.get("content")),
+                    is_error: b.get("is_error").and_then(|x| x.as_bool()).unwrap_or(false),
+                });
+            }
+            _ => {}
+        }
+    }
+    blocks
+}
+
+/// A tool_result's `content` is usually a string, sometimes an array of text blocks.
+fn tool_result_text(content: Option<&serde_json::Value>) -> String {
+    match content {
+        Some(v) if v.is_string() => v.as_str().unwrap_or("").to_string(),
+        Some(v) if v.is_array() => {
+            let mut s = String::new();
+            for b in v.as_array().unwrap() {
+                if b.get("type").and_then(|t| t.as_str()) == Some("text") {
+                    if let Some(t) = b.get("text").and_then(|x| x.as_str()) {
+                        s.push_str(t);
+                        s.push('\n');
+                    }
+                }
+            }
+            s.trim_end().to_string()
+        }
+        _ => String::new(),
+    }
+}
+
+/// Parse a transcript .jsonl into ordered messages (real user/assistant turns only).
+fn parse_transcript_file(path: &Path) -> Vec<Message> {
+    let file = match fs::File::open(path) {
+        Ok(f) => f,
+        Err(_) => return vec![],
+    };
+    let reader = BufReader::new(file);
+    let mut out = Vec::new();
+
+    for line in reader.lines() {
+        let line = match line {
+            Ok(l) if !l.trim().is_empty() => l,
+            _ => continue,
+        };
+        let v: serde_json::Value = match serde_json::from_str(&line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        let kind = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        if kind != "user" && kind != "assistant" {
+            continue;
+        }
+        if v.get("isMeta").and_then(|b| b.as_bool()).unwrap_or(false) {
+            continue;
+        }
+
+        let content = match v.get("message").and_then(|m| m.get("content")) {
+            Some(c) => c,
+            None => continue,
+        };
+        let blocks = content_to_blocks(content);
+        if blocks.is_empty() {
+            continue;
+        }
+
+        out.push(Message {
+            role: kind.to_string(),
+            ts: v
+                .get("timestamp")
+                .and_then(|t| t.as_str())
+                .and_then(iso_to_millis)
+                .unwrap_or(0),
+            blocks,
+        });
+    }
+    out
+}
+
+/// Read a full session transcript plus any subagent sidechains stored alongside it
+/// at `<parent>/<session-id>/subagents/*.jsonl`.
+#[tauri::command]
+fn get_session_messages(path: String) -> Result<Transcript, String> {
+    let p = PathBuf::from(&path);
+    if !p.exists() {
+        return Err("Session file not found".to_string());
+    }
+
+    let messages = parse_transcript_file(&p);
+
+    let mut subagents = Vec::new();
+    if let (Some(parent), Some(stem)) = (p.parent(), p.file_stem()) {
+        let sdir = parent.join(stem).join("subagents");
+        if sdir.is_dir() {
+            if let Ok(entries) = fs::read_dir(&sdir) {
+                let mut files: Vec<PathBuf> = entries
+                    .flatten()
+                    .map(|e| e.path())
+                    .filter(|pp| pp.extension().and_then(|e| e.to_str()) == Some("jsonl"))
+                    .collect();
+                files.sort();
+                for f in files {
+                    let id = f
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    let msgs = parse_transcript_file(&f);
+                    if !msgs.is_empty() {
+                        subagents.push(Subagent { id, messages: msgs });
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(Transcript { messages, subagents })
+}
+
 fn projects_dir() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".claude").join("projects"))
 }
@@ -271,7 +475,11 @@ fn run_command(command: String, cwd: Option<String>) -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![list_sessions, run_command])
+        .invoke_handler(tauri::generate_handler![
+            list_sessions,
+            get_session_messages,
+            run_command
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -22,6 +22,31 @@ export type SortKey =
   | "titleAZ"
   | "oldestFirst";
 
+// --- Transcript (iteration 3: "Lire") --------------------------------------
+
+/** One content block inside a message. `kind` mirrors the Rust `Block` enum tag. */
+export type Block =
+  | { kind: "text"; text: string }
+  | { kind: "thinking"; text: string }
+  | { kind: "toolUse"; id: string; name: string; input: Record<string, unknown> }
+  | { kind: "toolResult"; toolUseId: string; text: string; isError: boolean };
+
+export interface Message {
+  role: "user" | "assistant";
+  ts: number; // epoch ms (0 if missing)
+  blocks: Block[];
+}
+
+export interface Subagent {
+  id: string;
+  messages: Message[];
+}
+
+export interface Transcript {
+  messages: Message[];
+  subagents: Subagent[];
+}
+
 /** A "Resume" launcher: an editable command template with {cwd} and {id} placeholders. */
 export interface Launcher {
   id: string;

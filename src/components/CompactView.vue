@@ -17,12 +17,12 @@ const sort = defineModel<SortKey>("sort", { required: true });
 const emit = defineEmits<{
   select: [id: string];
   resume: [session: Session];
+  menu: [session: Session, ev: MouseEvent];
   openSettings: [];
   reload: [];
 }>();
 
-const { theme, toggleTheme } = useTheme();
-const themeLabel = () => (theme.value === "light" ? "Light" : "Dark");
+const { toggleTheme } = useTheme();
 
 const GROUPS: { key: Grouping; label: string }[] = [
   { key: "none", label: "None" },
@@ -195,6 +195,7 @@ function pickSort(key: SortKey) {
           :title="s.project"
           @click="emit('select', s.id)"
           @dblclick="emit('resume', s)"
+          @contextmenu.prevent="emit('menu', s, $event)"
         >
           <span class="glyph">{}</span>
           <span class="ltitle">
@@ -237,6 +238,7 @@ function pickSort(key: SortKey) {
             :class="{ selected: selectedId === s.id }"
             @click="emit('select', s.id)"
             @dblclick="emit('resume', s)"
+            @contextmenu.prevent="emit('menu', s, $event)"
           >
             <span class="glyph">{}</span>
             <span class="ltitle">
@@ -259,8 +261,16 @@ function pickSort(key: SortKey) {
     </div>
 
     <div class="footer">
-      <button class="theme" title="Toggle theme" @click="toggleTheme">
-        <span class="swatch"></span>{{ themeLabel() }}
+      <span class="ver">v0.1 · local</span>
+      <button class="icon-btn" title="Toggle theme" @click="toggleTheme">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+          <path
+            d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z"
+            stroke="currentColor"
+            stroke-width="1.7"
+          />
+          <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.7" />
+        </svg>
       </button>
       <button class="icon-btn" title="Settings" @click="emit('openSettings')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
@@ -299,12 +309,19 @@ function pickSort(key: SortKey) {
   align-items: baseline;
   gap: 8px;
   min-width: 0;
+  flex: 1;
 }
 .title {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.8px;
   color: var(--dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.count {
+  flex: none;
 }
 .count {
   font-family: var(--mono);
@@ -606,33 +623,21 @@ function pickSort(key: SortKey) {
   padding: 10px 12px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
   flex: none;
 }
-.theme {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 9px;
-  border-radius: 7px;
-  border: 1px solid var(--bd2);
-  background: transparent;
-  color: var(--dim);
-  cursor: pointer;
-  font-size: 11.5px;
-}
-.theme:hover {
-  background: var(--hover);
-}
-.swatch {
-  width: 11px;
-  height: 11px;
-  border-radius: 50%;
-  background: var(--acc);
-  display: inline-block;
+.ver {
+  margin-right: auto;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .footer .icon-btn {
+  flex: none;
   border: 1px solid var(--bd2);
 }
 </style>

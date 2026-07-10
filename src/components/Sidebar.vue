@@ -12,8 +12,7 @@ const emit = defineEmits<{
   openSettings: [];
 }>();
 
-const { theme, toggleTheme } = useTheme();
-const themeLabel = () => (theme.value === "light" ? "Light" : "Dark");
+const { toggleTheme } = useTheme();
 </script>
 
 <template>
@@ -54,8 +53,16 @@ const themeLabel = () => (theme.value === "light" ? "Light" : "Dark");
     </div>
 
     <div class="footer">
-      <button class="theme" title="Toggle theme" @click="toggleTheme">
-        <span class="swatch"></span>{{ themeLabel() }}
+      <span class="ver">v0.1 · local</span>
+      <button class="icon-btn" title="Toggle theme" @click="toggleTheme">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+          <path
+            d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z"
+            stroke="currentColor"
+            stroke-width="1.7"
+          />
+          <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.7" />
+        </svg>
       </button>
       <button class="icon-btn" title="Settings" @click="emit('openSettings')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
@@ -174,14 +181,26 @@ const themeLabel = () => (theme.value === "light" ? "Light" : "Dark");
   padding: 10px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
 }
-.icon-btn,
-.theme {
+.footer .icon-btn {
+  flex: none;
+}
+.ver {
+  margin-right: auto;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.icon-btn {
   display: flex;
   align-items: center;
   gap: 6px;
+  padding: 6px;
   border-radius: 7px;
   border: 1px solid var(--bd2);
   background: transparent;
@@ -189,24 +208,8 @@ const themeLabel = () => (theme.value === "light" ? "Light" : "Dark");
   cursor: pointer;
   font-size: 11.5px;
 }
-.icon-btn {
-  padding: 6px;
-}
 .icon-btn:hover {
-  color: var(--tx);
-}
-.theme {
-  padding: 5px 9px;
-}
-.icon-btn:hover,
-.theme:hover {
   background: var(--hover);
-}
-.swatch {
-  width: 11px;
-  height: 11px;
-  border-radius: 50%;
-  background: var(--acc);
-  display: inline-block;
+  color: var(--tx);
 }
 </style>

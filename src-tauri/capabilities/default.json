@@ -7,6 +7,7 @@
     "core:default",
     "opener:default",
     "opener:allow-open-url",
+    "opener:allow-reveal-item-in-dir",
     "core:window:allow-start-dragging",
     "core:window:allow-minimize",
     "core:window:allow-maximize",
@@ -14,6 +15,9 @@
     "core:window:allow-toggle-maximize",
     "core:window:allow-is-maximized",
     "core:window:allow-set-min-size",
+    "core:window:allow-set-size",
+    "core:window:allow-inner-size",
+    "core:window:allow-scale-factor",
     "core:window:allow-close"
   ]
 }

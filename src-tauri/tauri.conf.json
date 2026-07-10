@@ -10,6 +10,7 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "title": "Claude Sessions",
@@ -17,8 +18,8 @@
         "height": 840,
         "minWidth": 360,
         "minHeight": 560,
-        "backgroundColor": "#0b0b0d",
-        "decorations": false
+        "decorations": false,
+        "transparent": true
       }
     ],
     "security": {

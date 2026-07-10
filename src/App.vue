@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from "vue";
+import { ref, computed, watch, onMounted } from "vue";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import type { Grouping, SortKey, Session } from "./types";
 import { useSessions } from "./composables/useSessions";
@@ -14,11 +14,32 @@ import EmptyState from "./components/EmptyState.vue";
 import Toast from "./components/Toast.vue";
 import SettingsModal from "./components/SettingsModal.vue";
 import CompactView from "./components/CompactView.vue";
+import TranscriptViewer from "./components/TranscriptViewer.vue";
+import ContextMenu, { type MenuItem } from "./components/ContextMenu.vue";
 import { useTheme } from "./composables/useTheme";
+import { useTranscript } from "./composables/useTranscript";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 
 const { sessions, loading, error, reload } = useSessions();
-const { resume } = useSettings();
+const { resume, launchers, defaultLauncher } = useSettings();
 const { layout } = useTheme();
+const {
+  transcript,
+  loading: transcriptLoading,
+  error: transcriptError,
+  load: loadTranscript,
+} = useTranscript();
+
+// getCurrentWindow() throws synchronously outside the Tauri runtime (plain vite
+// preview / a browser), so guard it — otherwise setup throws and the app never
+// mounts.
+function safeWindow() {
+  try {
+    return getCurrentWindow();
+  } catch {
+    return null;
+  }
+}
 
 // Compact mode lets the window collapse down to just the tree pane (~30% of the
 // default width); comfortable keeps the roomier two-pane minimum.
@@ -26,11 +47,9 @@ watch(
   layout,
   (mode) => {
     const min = mode === "compact" ? new LogicalSize(360, 560) : new LogicalSize(880, 560);
-    getCurrentWindow()
-      .setMinSize(min)
-      .catch(() => {
-        /* no-op outside the Tauri runtime (e.g. vite preview) */
-      });
+    safeWindow()
+      ?.setMinSize(min)
+      .catch(() => {});
   },
   { immediate: true },
 );
@@ -45,6 +64,44 @@ const compactSort = ref<SortKey>("recentUpdated");
 const projectFilter = ref<string | null>(null); // stores the project path
 const selectedId = ref<string | null>(null);
 const settingsOpen = ref(false);
+
+// The transcript viewer follows the current selection.
+const selectedSession = computed(
+  () => sessions.value.find((s) => s.id === selectedId.value) ?? null,
+);
+watch(selectedSession, (s) => loadTranscript(s), { immediate: true });
+
+// In compact mode the window itself is the widget: it collapses to just the
+// sidebar width when no transcript is open, and grows to fit the viewer when one
+// is. Comfortable mode just makes sure the window isn't stuck at a compact width.
+async function fitWindow() {
+  const win = safeWindow();
+  if (!win) return;
+  // Logical (CSS) px straight from the DOM — no innerSize()/scaleFactor() reads,
+  // which can silently fail and leave the window stuck at a wide width.
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  try {
+    // The settings modal needs a fixed footprint; widen the window to fit it
+    // instead of letting the compact width squeeze it.
+    if (settingsOpen.value) {
+      if (w < 780) await win.setSize(new LogicalSize(820, h));
+      return;
+    }
+    if (layout.value === "compact") {
+      if (selectedSession.value) {
+        if (w < 700) await win.setSize(new LogicalSize(1040, h));
+      } else {
+        await win.setSize(new LogicalSize(360, h));
+      }
+    } else if (w < 900) {
+      await win.setSize(new LogicalSize(1200, h));
+    }
+  } catch {
+    /* no-op outside the Tauri runtime */
+  }
+}
+watch([layout, selectedSession, settingsOpen], fitWindow, { immediate: true });
 
 const toast = ref<string | null>(null);
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
@@ -153,11 +210,87 @@ const emptyMsg = computed(() =>
 
 // --- actions --------------------------------------------------------------
 
-async function onResume(s: Session) {
+async function onResume(s: Session, launcher?: (typeof launchers.value)[number]) {
   selectedId.value = s.id;
   try {
-    const status = await resume(s);
+    const status = await resume(s, launcher);
     fireToast(status);
+  } catch (e) {
+    fireToast(`Failed: ${e}`);
+  }
+}
+
+// --- context menu ---------------------------------------------------------
+
+const menu = ref<{ session: Session; x: number; y: number } | null>(null);
+
+function openMenu(s: Session, e: MouseEvent) {
+  menu.value = { session: s, x: e.clientX, y: e.clientY };
+}
+
+// Kill the webview's native right-click menu (Inspect Element, Reload, …) app-wide,
+// keeping only our own context menu. Editable fields keep theirs (paste/select).
+onMounted(() => {
+  window.addEventListener("contextmenu", (e) => {
+    const t = e.target as HTMLElement | null;
+    if (t?.closest("input, textarea, [contenteditable='true']")) return;
+    e.preventDefault();
+  });
+});
+
+const menuItems = computed<MenuItem[]>(() => {
+  const items: MenuItem[] = [
+    { type: "item", key: "open", label: "Open transcript" },
+    { type: "item", key: "resume", label: "Resume", sub: defaultLauncher.value?.label },
+  ];
+  if (launchers.value.length) {
+    items.push({ type: "header", label: "Resume in" });
+    for (const l of launchers.value) {
+      items.push({ type: "item", key: `launch:${l.id}`, label: l.label, sub: l.kind });
+    }
+  }
+  items.push(
+    { type: "divider" },
+    { type: "item", key: "copy-cmd", label: "Copy resume command" },
+    { type: "item", key: "copy-id", label: "Copy session ID" },
+    { type: "item", key: "copy-path", label: "Copy project path" },
+    { type: "divider" },
+    { type: "item", key: "reveal", label: "Reveal in Finder" },
+  );
+  return items;
+});
+
+async function onMenuAction(key: string) {
+  const s = menu.value?.session;
+  menu.value = null;
+  if (!s) return;
+
+  if (key === "open") {
+    selectedId.value = s.id;
+    return;
+  }
+  if (key === "resume") {
+    onResume(s);
+    return;
+  }
+  if (key.startsWith("launch:")) {
+    const l = launchers.value.find((x) => x.id === key.slice("launch:".length));
+    onResume(s, l);
+    return;
+  }
+  try {
+    if (key === "copy-cmd") {
+      await navigator.clipboard.writeText(`claude --resume ${s.id}`);
+      fireToast("Copied resume command");
+    } else if (key === "copy-id") {
+      await navigator.clipboard.writeText(s.id);
+      fireToast("Copied session ID");
+    } else if (key === "copy-path") {
+      await navigator.clipboard.writeText(s.project);
+      fireToast("Copied project path");
+    } else if (key === "reveal") {
+      await revealItemInDir(s.path);
+    }
   } catch (e) {
     fireToast(`Failed: ${e}`);
   }
@@ -168,7 +301,11 @@ async function onResume(s: Session) {
   <div class="app">
     <TitleBar />
 
-    <div v-if="layout === 'compact'" class="workspace compact-workspace">
+    <div
+      v-if="layout === 'compact'"
+      class="workspace compact-workspace"
+      :class="{ 'has-viewer': selectedSession }"
+    >
       <CompactView
         v-model:query="query"
         v-model:grouping="compactGrouping"
@@ -177,18 +314,23 @@ async function onResume(s: Session) {
         :selected-id="selectedId"
         @select="selectedId = $event"
         @resume="onResume"
+        @menu="openMenu"
         @reload="reload"
         @open-settings="settingsOpen = true"
       />
-      <div class="viz-pane">
-        <div class="viz-empty">
-          <span>Select a session</span>
-          <small>The preview will show up here.</small>
-        </div>
+      <div v-if="selectedSession" class="viz-pane">
+        <TranscriptViewer
+          :session="selectedSession"
+          :transcript="transcript"
+          :loading="transcriptLoading"
+          :error="transcriptError"
+          @resume="onResume(selectedSession)"
+          @close="selectedId = null"
+        />
       </div>
     </div>
 
-    <div v-else class="workspace">
+    <div v-else class="workspace" :class="{ 'has-viewer': selectedSession }">
       <Sidebar
         :projects="projectList"
         :active-project="projectFilter"
@@ -234,6 +376,7 @@ async function onResume(s: Session) {
               :query="query"
               @select="selectedId = s.id"
               @resume="onResume(s)"
+              @menu="openMenu(s, $event)"
             />
           </div>
         </template>
@@ -241,9 +384,29 @@ async function onResume(s: Session) {
 
         <Toast :message="toast" />
       </main>
+
+      <div v-if="selectedSession" class="viz-pane">
+        <TranscriptViewer
+          :session="selectedSession"
+          :transcript="transcript"
+          :loading="transcriptLoading"
+          :error="transcriptError"
+          @resume="onResume(selectedSession)"
+          @close="selectedId = null"
+        />
+      </div>
     </div>
 
     <SettingsModal v-if="settingsOpen" @close="settingsOpen = false" />
+
+    <ContextMenu
+      v-if="menu"
+      :items="menuItems"
+      :x="menu.x"
+      :y="menu.y"
+      @select="onMenuAction"
+      @close="menu = null"
+    />
   </div>
 </template>
 
@@ -256,6 +419,7 @@ async function onResume(s: Session) {
   color: var(--tx);
   overflow: hidden;
   position: relative;
+  border-radius: 16px;
 }
 .workspace {
   flex: 1;
@@ -263,7 +427,13 @@ async function onResume(s: Session) {
   display: grid;
   grid-template-columns: 264px 1fr;
 }
+.workspace.has-viewer {
+  grid-template-columns: 264px minmax(300px, 430px) 1fr;
+}
 .compact-workspace {
+  grid-template-columns: 1fr;
+}
+.compact-workspace.has-viewer {
   grid-template-columns: 320px 1fr;
 }
 .viz-pane {

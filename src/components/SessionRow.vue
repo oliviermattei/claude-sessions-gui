@@ -12,6 +12,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   select: [];
   resume: [];
+  menu: [ev: MouseEvent];
 }>();
 
 const parts = computed(() => highlight(props.session.title, props.query));
@@ -30,6 +31,7 @@ function onResume(e: MouseEvent) {
     :title="session.project"
     @click="emit('select')"
     @dblclick="emit('resume')"
+    @contextmenu.prevent="emit('menu', $event)"
   >
     <div class="body">
       <div class="title">
