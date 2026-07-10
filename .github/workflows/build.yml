@@ -20,14 +20,41 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      # Pull the section for this version out of CHANGELOG.md so it becomes the
+      # release body. GitHub renders the body ABOVE the assets, which is exactly
+      # where we want the changelog to appear.
+      - name: Extract changelog section
+        id: changelog
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          # Capture lines between "## [VERSION]" and the next section header or
+          # the trailing "[link]: url" reference definitions.
+          awk -v ver="$VERSION" '
+            $0 ~ "^## \\[" ver "\\]" { flag=1; next }
+            flag && (/^## \[/ || /^\[[^]]+\]: /) { flag=0 }
+            flag { print }
+          ' CHANGELOG.md > RELEASE_NOTES.md
+          # Strip leading/trailing blank lines.
+          sed -i -e '/./,$!d' -e :a -e '/^\n*$/{$d;N;ba' -e '}' RELEASE_NOTES.md || true
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "No changelog entry found for ${VERSION}. See CHANGELOG.md." > RELEASE_NOTES.md
+          fi
+          echo "----- release notes -----"; cat RELEASE_NOTES.md
+
       - name: Create release placeholder
         uses: ncipollo/release-action@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           tag: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
+          bodyFile: RELEASE_NOTES.md
           skipIfReleaseExists: true
           prerelease: ${{ contains(github.ref_name, 'beta') || contains(github.ref_name, 'alpha') || contains(github.ref_name, 'rc') }}
+          # Auto-generated commit notes are appended AFTER the changelog body.
           generateReleaseNotes: true
 
   build:

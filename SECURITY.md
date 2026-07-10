@@ -1,0 +1,54 @@
+# Security Policy
+
+## Supported versions
+
+Claude Sessions is distributed as prebuilt desktop installers via GitHub
+Releases. Only the **latest released version** receives security fixes. Please
+upgrade before reporting an issue to confirm it still reproduces.
+
+| Version | Supported          |
+| ------- | ------------------ |
+| latest  | :white_check_mark: |
+| older   | :x:                |
+
+## Security model
+
+A few properties are load-bearing for this app's safety — please keep them in
+mind when auditing or contributing:
+
+- **Read-only access to transcripts.** The app scans
+  `~/.claude/projects/**/*.jsonl` read-only and must never write to, move, or
+  delete user transcripts. A regression that breaks this is a security bug.
+- **Local-only.** The app performs no network requests to transmit session
+  contents. Session data never leaves the user's machine.
+- **User-defined launchers execute commands.** "Resume" launchers run
+  user-configured command templates via the OS shell. Templates are under the
+  user's control; a bug that lets untrusted transcript content influence the
+  executed command (e.g. via `{cwd}`/`{id}` substitution) would be a serious
+  vulnerability.
+
+## Reporting a vulnerability
+
+**Please do not open a public issue for security vulnerabilities.**
+
+Report privately through one of:
+
+1. **GitHub Security Advisories** — preferred. Use
+   [*Report a vulnerability*](https://github.com/oliviermattei/claude-sessions/security/advisories/new)
+   on the repository's Security tab.
+2. **Email** — `hello@feedvox.co`.
+
+Please include:
+
+- A description of the vulnerability and its impact.
+- Steps to reproduce (a proof of concept if possible).
+- Affected version and platform (OS + app version).
+
+### What to expect
+
+- Acknowledgement within **72 hours**.
+- An initial assessment and severity classification.
+- Coordinated disclosure: we will agree on a timeline and credit you in the
+  release notes unless you prefer to stay anonymous.
+
+Thank you for helping keep Claude Sessions and its users safe.

@@ -3,6 +3,26 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "description": "A lightweight local desktop app to browse, search and relaunch your Claude Code sessions. Built with Tauri 2 + Vue 3.",
+  "license": "MIT",
+  "author": "Olivier Mattei",
+  "homepage": "https://github.com/oliviermattei/claude-sessions#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/oliviermattei/claude-sessions.git"
+  },
+  "bugs": {
+    "url": "https://github.com/oliviermattei/claude-sessions/issues"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "tauri",
+    "vue",
+    "desktop",
+    "sessions",
+    "session-manager"
+  ],
   "packageManager": "pnpm@10.33.0",
   "scripts": {
     "dev": "vite",

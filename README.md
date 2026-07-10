@@ -1,5 +1,11 @@
 # Claude Sessions
 
+[![CI](https://github.com/oliviermattei/claude-sessions/actions/workflows/ci.yml/badge.svg)](https://github.com/oliviermattei/claude-sessions/actions/workflows/ci.yml)
+[![Release](https://github.com/oliviermattei/claude-sessions/actions/workflows/build.yml/badge.svg)](https://github.com/oliviermattei/claude-sessions/actions/workflows/build.yml)
+[![Latest release](https://img.shields.io/github/v/release/oliviermattei/claude-sessions?include_prereleases&sort=semver)](https://github.com/oliviermattei/claude-sessions/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+[![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](https://github.com/oliviermattei/claude-sessions/releases/latest)
+
 A lightweight local desktop app to browse, search and relaunch your Claude Code
 sessions. Built with **Tauri 2** (Rust backend) + **Vue 3 / Vite** (TypeScript).
 
@@ -94,3 +100,21 @@ The Rust lib is built as `crate-type = ["rlib"]` only. Under the
 `ld`'s "export ordinal too large" limit; a plain rlib linked statically into the
 binary avoids it. (Mobile targets, which need cdylib/staticlib, are not a goal
 here.)
+
+## Contributing
+
+Contributions are welcome! Please read the
+[contributing guide](./CONTRIBUTING.md) for setup, conventions and the PR
+process, and note our [Code of Conduct](./CODE_OF_CONDUCT.md). Found a security
+issue? See [SECURITY.md](./SECURITY.md) — please report it privately.
+
+Changes are tracked in [CHANGELOG.md](./CHANGELOG.md).
+
+## Support
+
+If you find this useful, you can
+<a href="https://buymeacoffee.com/oliviermattei" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="40"></a>
+
+## License
+
+[MIT](./LICENSE) © Olivier Mattei

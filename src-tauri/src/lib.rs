@@ -17,15 +17,15 @@ use std::time::UNIX_EPOCH;
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct Session {
-    id: String,           // session UUID (the .jsonl filename)
-    title: String,        // custom title > last prompt > first user message > "Untitled"
-    project: String,      // absolute cwd, e.g. "D:\\www\\claude-sessions"
-    project_name: String, // last path segment, e.g. "claude-sessions"
-    messages: u32,        // count of real user/assistant turns
-    updated: i64,         // last message timestamp (fallback: file mtime)
-    created: i64,         // first message timestamp (fallback: file mtime)
-    modified: i64,        // file modification time
-    path: String,         // absolute path to the .jsonl file
+    id: String,            // session UUID (the .jsonl filename)
+    title: String,         // custom title > last prompt > first user message > "Untitled"
+    project: String,       // absolute cwd, e.g. "D:\\www\\claude-sessions"
+    project_name: String,  // last path segment, e.g. "claude-sessions"
+    messages: u32,         // count of real user/assistant turns
+    updated: i64,          // last message timestamp (fallback: file mtime)
+    created: i64,          // first message timestamp (fallback: file mtime)
+    modified: i64,         // file modification time
+    path: String,          // absolute path to the .jsonl file
     color: Option<String>, // Claude "agent-color" (red/blue/…) or None
 }
 
@@ -117,7 +117,11 @@ fn parse_session(path: &Path) -> Option<Session> {
             // Claude writes the session's accent color as its own row; last wins.
             "agent-color" => {
                 if let Some(c) = v.get("agentColor").and_then(|c| c.as_str()) {
-                    agent_color = if c == "default" { None } else { Some(c.to_string()) };
+                    agent_color = if c == "default" {
+                        None
+                    } else {
+                        Some(c.to_string())
+                    };
                 }
             }
             "last-prompt" => {
@@ -129,7 +133,10 @@ fn parse_session(path: &Path) -> Option<Session> {
                 // Skip meta rows and subagent sidechains when counting turns / picking a title,
                 // but still let their timestamps and cwd through below.
                 let is_meta = v.get("isMeta").and_then(|b| b.as_bool()).unwrap_or(false);
-                let is_sidechain = v.get("isSidechain").and_then(|b| b.as_bool()).unwrap_or(false);
+                let is_sidechain = v
+                    .get("isSidechain")
+                    .and_then(|b| b.as_bool())
+                    .unwrap_or(false);
                 if !is_meta && !is_sidechain {
                     messages += 1;
                     if kind == "user" && first_user_text.is_none() {
@@ -153,8 +160,10 @@ fn parse_session(path: &Path) -> Option<Session> {
                         cwd = Some(c.to_string());
                     }
                 }
-                if let Some(ts) =
-                    v.get("timestamp").and_then(|t| t.as_str()).and_then(iso_to_millis)
+                if let Some(ts) = v
+                    .get("timestamp")
+                    .and_then(|t| t.as_str())
+                    .and_then(iso_to_millis)
                 {
                     if first_ts.is_none() {
                         first_ts = Some(ts);
@@ -189,7 +198,7 @@ fn parse_session(path: &Path) -> Option<Session> {
     let project = cwd.unwrap_or_else(|| "Unknown".to_string());
     let project_name = Path::new(&project)
         .components()
-        .last()
+        .next_back()
         .map(|c| c.as_os_str().to_string_lossy().to_string())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| project.clone());
@@ -260,7 +269,9 @@ fn content_to_blocks(content: &serde_json::Value) -> Vec<Block> {
 
     if let Some(s) = content.as_str() {
         if !s.trim().is_empty() {
-            blocks.push(Block::Text { text: s.to_string() });
+            blocks.push(Block::Text {
+                text: s.to_string(),
+            });
         }
         return blocks;
     }
@@ -272,18 +283,30 @@ fn content_to_blocks(content: &serde_json::Value) -> Vec<Block> {
         match b.get("type").and_then(|t| t.as_str()).unwrap_or("") {
             "text" => {
                 if let Some(t) = b.get("text").and_then(|x| x.as_str()) {
-                    blocks.push(Block::Text { text: t.to_string() });
+                    blocks.push(Block::Text {
+                        text: t.to_string(),
+                    });
                 }
             }
             "thinking" => {
                 if let Some(t) = b.get("thinking").and_then(|x| x.as_str()) {
-                    blocks.push(Block::Thinking { text: t.to_string() });
+                    blocks.push(Block::Thinking {
+                        text: t.to_string(),
+                    });
                 }
             }
             "tool_use" => {
                 blocks.push(Block::ToolUse {
-                    id: b.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string(),
-                    name: b.get("name").and_then(|x| x.as_str()).unwrap_or("tool").to_string(),
+                    id: b
+                        .get("id")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    name: b
+                        .get("name")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("tool")
+                        .to_string(),
                     input: b.get("input").cloned().unwrap_or(serde_json::Value::Null),
                 });
             }
@@ -409,7 +432,10 @@ fn get_session_messages(path: String) -> Result<Transcript, String> {
         }
     }
 
-    Ok(Transcript { messages, subagents })
+    Ok(Transcript {
+        messages,
+        subagents,
+    })
 }
 
 fn projects_dir() -> Option<PathBuf> {
@@ -462,7 +488,9 @@ fn run_command(command: String, cwd: Option<String>) -> Result<(), String> {
         // CREATE_NO_WINDOW: don't flash a console for the transient `cmd` host.
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         let mut cmd = std::process::Command::new("cmd");
-        cmd.arg("/C").raw_arg(&command).creation_flags(CREATE_NO_WINDOW);
+        cmd.arg("/C")
+            .raw_arg(&command)
+            .creation_flags(CREATE_NO_WINDOW);
         if let Some(dir) = cwd.as_deref().filter(|d| !d.is_empty()) {
             cmd.current_dir(dir);
         }
@@ -574,7 +602,10 @@ fn is_empty_session(path: &Path) -> bool {
         let kind = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
         if kind == "user" || kind == "assistant" {
             let is_meta = v.get("isMeta").and_then(|b| b.as_bool()).unwrap_or(false);
-            let is_side = v.get("isSidechain").and_then(|b| b.as_bool()).unwrap_or(false);
+            let is_side = v
+                .get("isSidechain")
+                .and_then(|b| b.as_bool())
+                .unwrap_or(false);
             if !is_meta && !is_side {
                 return false; // found a real turn → not empty
             }
@@ -597,7 +628,9 @@ fn find_empty_sessions() -> Result<Vec<String>, String> {
         if !dir.is_dir() {
             continue;
         }
-        let Ok(files) = fs::read_dir(&dir) else { continue };
+        let Ok(files) = fs::read_dir(&dir) else {
+            continue;
+        };
         for f in files.flatten() {
             let p = f.path();
             if p.extension().and_then(|e| e.to_str()) == Some("jsonl") && is_empty_session(&p) {
