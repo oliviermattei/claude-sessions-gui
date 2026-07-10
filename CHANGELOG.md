@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-07-10
+
+### Fixed
+
+- Build de l'AppImage **linux-arm64** : installation de `xdg-utils` (manquant sur
+  l'image CI arm64) qui bloquait l'empaquetage. L'installeur arm64 est de nouveau
+  produit et attaché à la release.
+
 ## [0.2.1] - 2026-07-10
 
 ### Changed
@@ -44,7 +52,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-platform release workflow producing installers for Windows, macOS
   (arm64 + x64) and Linux (x86_64 + arm64).
 
-[Unreleased]: https://github.com/oliviermattei/claude-sessions-gui/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/oliviermattei/claude-sessions-gui/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/oliviermattei/claude-sessions-gui/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/oliviermattei/claude-sessions-gui/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/oliviermattei/claude-sessions-gui/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/oliviermattei/claude-sessions-gui/releases/tag/v0.1.0
