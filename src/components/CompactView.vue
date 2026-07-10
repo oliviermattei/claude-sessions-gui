@@ -33,19 +33,6 @@ const GROUPS: { key: Grouping; label: string }[] = [
   { key: "date", label: "Date" },
 ];
 
-const cleanOpen = ref(false);
-const OLDER: { days: number; label: string }[] = [
-  { days: 7, label: "7 days" },
-  { days: 30, label: "30 days" },
-  { days: 90, label: "90 days" },
-  { days: 180, label: "6 months" },
-  { days: 365, label: "1 year" },
-];
-function pickClean(action: CleanAction) {
-  cleanOpen.value = false;
-  emit("clean", action);
-}
-
 // --- tree data -----------------------------------------------------------
 
 interface Node {
@@ -137,46 +124,26 @@ function pickSort(key: SortKey) {
             />
           </svg>
         </button>
-        <div class="opt-wrap">
-          <button
-            class="icon-btn"
-            :class="{ on: cleanOpen }"
-            title="Clean up sessions"
-            @click="cleanOpen = !cleanOpen"
-          >
-            <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
-              <path
-                d="M7.2 2.2 9 4 5 8l-1.8-1.8a.8.8 0 0 1 0-1.2L6 2.2a.8.8 0 0 1 1.2 0Z"
-                stroke="currentColor"
-                stroke-width="1.3"
-                stroke-linejoin="round"
-              />
-              <path
-                d="m8.4 5.2 2.4 2.4-3.3 3.3c-.5.5-1.2.8-1.9.8H2.5l1.2-1.2c.3-.3.5-.8.5-1.2 0-.5.2-1 .5-1.3l3.2-3Z"
-                stroke="currentColor"
-                stroke-width="1.3"
-                stroke-linejoin="round"
-              />
-            </svg>
-          </button>
-          <template v-if="cleanOpen">
-            <div class="overlay" @click="cleanOpen = false"></div>
-            <div class="menu">
-              <button class="clean-opt" @click="pickClean({ mode: 'empty' })">
-                Empty sessions
-              </button>
-              <div class="menu-label">Older than</div>
-              <button
-                v-for="o in OLDER"
-                :key="o.days"
-                class="clean-opt"
-                @click="pickClean({ mode: 'older', days: o.days, label: o.label })"
-              >
-                {{ o.label }}
-              </button>
-            </div>
-          </template>
-        </div>
+        <button
+          class="icon-btn"
+          title="Cleanup empty sessions"
+          @click="emit('clean', { mode: 'empty' })"
+        >
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+            <path
+              d="M7.2 2.2 9 4 5 8l-1.8-1.8a.8.8 0 0 1 0-1.2L6 2.2a.8.8 0 0 1 1.2 0Z"
+              stroke="currentColor"
+              stroke-width="1.3"
+              stroke-linejoin="round"
+            />
+            <path
+              d="m8.4 5.2 2.4 2.4-3.3 3.3c-.5.5-1.2.8-1.9.8H2.5l1.2-1.2c.3-.3.5-.8.5-1.2 0-.5.2-1 .5-1.3l3.2-3Z"
+              stroke="currentColor"
+              stroke-width="1.3"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </button>
         <div class="opt-wrap">
           <button
             class="icon-btn"
@@ -435,21 +402,6 @@ function pickSort(key: SortKey) {
   text-transform: uppercase;
   color: var(--faint);
   padding: 6px 6px 5px;
-}
-.clean-opt {
-  display: block;
-  width: 100%;
-  text-align: left;
-  padding: 8px 8px;
-  border: none;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--tx);
-  cursor: pointer;
-  font-size: 12.5px;
-}
-.clean-opt:hover {
-  background: var(--hover);
 }
 .menu .segmented {
   display: flex;

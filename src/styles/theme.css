@@ -33,6 +33,23 @@
 
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Window corner radius. Borderless + transparent window, so we draw the
+     rounding ourselves; overridden per OS below (data-os on <html>, set in
+     main.ts). macOS keeps the large modern radius. */
+  --app-radius: 16px;
+}
+
+/* Windows 11 native window radius. Whole-pixel value to avoid the jagged/dark
+   corner artifact transparent windows show at fractional DPI scaling. */
+:root[data-os="windows"] {
+  --app-radius: 8px;
+}
+
+/* Linux/GNOME conventionally uses square corners (the compositor handles any
+   rounding), which also sidesteps transparent-corner aliasing. */
+:root[data-os="linux"] {
+  --app-radius: 0;
 }
 
 :root[data-theme="light"] {

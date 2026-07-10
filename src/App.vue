@@ -353,26 +353,17 @@ async function doDelete() {
   }
 }
 
-async function onClean(action: CleanAction) {
+async function onClean(_action: CleanAction) {
   try {
-    let paths: string[];
-    let what: string;
-    if (action.mode === "empty") {
-      paths = await invoke<string[]>("find_empty_sessions");
-      what = "empty session";
-    } else {
-      const cutoff = Date.now() - action.days * 86_400_000;
-      paths = sessions.value.filter((s) => s.updated < cutoff).map((s) => s.path);
-      what = `session older than ${action.label}`;
-    }
+    const paths = await invoke<string[]>("find_empty_sessions");
     if (!paths.length) {
-      fireToast("Nothing to clean");
+      fireToast("No empty sessions to clean");
       return;
     }
     const n = paths.length;
     cleanConfirm.value = {
       paths,
-      title: `Clean ${n} ${what}${n > 1 ? "s" : ""}?`,
+      title: `Clean ${n} empty session${n > 1 ? "s" : ""}?`,
       body: `${n} transcript${n > 1 ? "s" : ""} will be moved to the Trash. You can restore ${n > 1 ? "them" : "it"} from there.`,
     };
   } catch (e) {
@@ -638,7 +629,7 @@ async function onMenuAction(key: string) {
   color: var(--tx);
   overflow: hidden;
   position: relative;
-  border-radius: 16px;
+  border-radius: var(--app-radius);
 }
 .workspace {
   flex: 1;
