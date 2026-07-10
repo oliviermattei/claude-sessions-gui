@@ -9,6 +9,12 @@
 A lightweight local desktop app to browse, search and relaunch your Claude Code
 sessions. Built with **Tauri 2** (Rust backend) + **Vue 3 / Vite** (TypeScript).
 
+<p align="center">
+  <a href="https://buymeacoffee.com/oliviermattei" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="48"></a>
+</p>
+
+<p align="center"><em>Free &amp; open source. If it saves you time, you can <a href="https://buymeacoffee.com/oliviermattei">buy me a coffee</a> ☕ — every little bit helps and keeps the project going.</em></p>
+
 The app reads your transcripts under `~/.claude/projects/**/*.jsonl`. Browsing,
 search and sorting are strictly read-only. Only the explicit session actions
 write, and never silently:
@@ -121,11 +127,6 @@ process, and note our [Code of Conduct](./CODE_OF_CONDUCT.md). Found a security
 issue? See [SECURITY.md](./SECURITY.md) — please report it privately.
 
 Changes are tracked in [CHANGELOG.md](./CHANGELOG.md).
-
-## Support
-
-If you find this useful, you can
-<a href="https://buymeacoffee.com/oliviermattei" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="40"></a>
 
 ## License
 
