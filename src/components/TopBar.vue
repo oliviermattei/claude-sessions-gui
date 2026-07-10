@@ -12,7 +12,11 @@ defineProps<{
   resultCount: string;
 }>();
 
-const emit = defineEmits<{ reload: [] }>();
+export type CleanAction =
+  | { mode: "empty" }
+  | { mode: "older"; days: number; label: string };
+
+const emit = defineEmits<{ reload: []; clean: [action: CleanAction] }>();
 
 const groupOptions: { key: Grouping; label: string }[] = [
   { key: "none", label: "None" },
@@ -24,6 +28,19 @@ const sortOpen = ref(false);
 function pickSort(key: SortKey) {
   sort.value = key;
   sortOpen.value = false;
+}
+
+const cleanOpen = ref(false);
+const olderOptions: { days: number; label: string }[] = [
+  { days: 7, label: "7 days" },
+  { days: 30, label: "30 days" },
+  { days: 90, label: "90 days" },
+  { days: 180, label: "6 months" },
+  { days: 365, label: "1 year" },
+];
+function pickClean(action: CleanAction) {
+  cleanOpen.value = false;
+  emit("clean", action);
 }
 </script>
 
@@ -72,6 +89,48 @@ function pickSort(key: SortKey) {
           />
         </svg>
       </button>
+
+      <!-- clean -->
+      <div class="clean">
+        <button class="reload" title="Clean up sessions" @click="cleanOpen = !cleanOpen">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+            <path
+              d="M7.2 2.2 9 4 5 8l-1.8-1.8a.8.8 0 0 1 0-1.2L6 2.2a.8.8 0 0 1 1.2 0Z"
+              stroke="currentColor"
+              stroke-width="1.3"
+              stroke-linejoin="round"
+            />
+            <path
+              d="m8.4 5.2 2.4 2.4-3.3 3.3c-.5.5-1.2.8-1.9.8H2.5l1.2-1.2c.3-.3.5-.8.5-1.2 0-.5.2-1 .5-1.3l3.2-3Z"
+              stroke="currentColor"
+              stroke-width="1.3"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </button>
+        <template v-if="cleanOpen">
+          <div class="overlay" @click="cleanOpen = false"></div>
+          <div class="menu clean-menu">
+            <button class="opt" @click="pickClean({ mode: 'empty' })">
+              <span class="opt-text">
+                <span class="opt-label">Empty sessions</span>
+                <span class="opt-sub">Transcripts with no real messages</span>
+              </span>
+            </button>
+            <div class="clean-head">Older than</div>
+            <button
+              v-for="o in olderOptions"
+              :key="o.days"
+              class="opt"
+              @click="pickClean({ mode: 'older', days: o.days, label: o.label })"
+            >
+              <span class="opt-text">
+                <span class="opt-label">{{ o.label }}</span>
+              </span>
+            </button>
+          </div>
+        </template>
+      </div>
 
       <!-- sort -->
       <div class="sort">
@@ -232,6 +291,22 @@ h1 {
 .reload:hover {
   background: var(--hover);
   color: var(--tx);
+}
+
+.clean {
+  position: relative;
+  flex: none;
+}
+.clean-menu {
+  width: 220px;
+}
+.clean-head {
+  padding: 8px 11px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--faint);
 }
 
 .sort {

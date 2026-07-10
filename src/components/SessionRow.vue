@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import type { Session } from "../types";
 import { relTime, highlight } from "../lib/format";
+import { colorHex } from "../lib/colors";
 
 const props = defineProps<{
   session: Session;
@@ -17,6 +18,7 @@ const emit = defineEmits<{
 
 const parts = computed(() => highlight(props.session.title, props.query));
 const date = computed(() => relTime(props.session.updated));
+const barColor = computed(() => colorHex(props.session.color));
 
 function onResume(e: MouseEvent) {
   e.stopPropagation();
@@ -33,6 +35,7 @@ function onResume(e: MouseEvent) {
     @dblclick="emit('resume')"
     @contextmenu.prevent="emit('menu', $event)"
   >
+    <span v-if="barColor" class="cbar" :style="{ background: barColor }"></span>
     <div class="body">
       <div class="title">
         <span>{{ parts.pre }}</span
@@ -70,6 +73,7 @@ function onResume(e: MouseEvent) {
 
 <style scoped>
 .row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 14px;
@@ -79,6 +83,16 @@ function onResume(e: MouseEvent) {
   background: transparent;
   box-shadow: none;
   transition: background 0.09s ease;
+}
+.cbar {
+  position: absolute;
+  left: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 26px;
+  border-radius: 2px;
+  flex: none;
 }
 .row:hover {
   background: var(--hover);

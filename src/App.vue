@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from "vue";
+import { ref, computed, watch, onMounted, nextTick } from "vue";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import type { Grouping, SortKey, Session } from "./types";
 import { useSessions } from "./composables/useSessions";
@@ -8,7 +8,7 @@ import { sortDef } from "./lib/sort";
 import { dateBucket, DATE_BUCKET_ORDER } from "./lib/format";
 import TitleBar from "./components/TitleBar.vue";
 import Sidebar from "./components/Sidebar.vue";
-import TopBar from "./components/TopBar.vue";
+import TopBar, { type CleanAction } from "./components/TopBar.vue";
 import SessionRow from "./components/SessionRow.vue";
 import EmptyState from "./components/EmptyState.vue";
 import Toast from "./components/Toast.vue";
@@ -19,6 +19,8 @@ import ContextMenu, { type MenuItem } from "./components/ContextMenu.vue";
 import { useTheme } from "./composables/useTheme";
 import { useTranscript } from "./composables/useTranscript";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
+import { invoke } from "@tauri-apps/api/core";
+import { SESSION_COLORS, colorHex, colorLabel } from "./lib/colors";
 
 const { sessions, loading, error, reload } = useSessions();
 const { resume, launchers, defaultLauncher } = useSettings();
@@ -238,27 +240,160 @@ onMounted(() => {
   });
 });
 
+// Distinct projects (keyed by absolute cwd), each carrying the folder that holds
+// its .jsonl files — the destination for a "Move to project" action.
+const projects = computed(() => {
+  const map = new Map<string, { cwd: string; name: string; dir: string }>();
+  for (const s of sessions.value) {
+    if (!map.has(s.project)) {
+      const dir = s.path.replace(/[\\/][^\\/]*$/, "");
+      map.set(s.project, { cwd: s.project, name: s.projectName, dir });
+    }
+  }
+  return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
+});
+
+// Move targets = every project other than the right-clicked session's own.
+const moveTargets = computed(() => {
+  const cur = menu.value?.session.project;
+  return projects.value.filter((p) => p.cwd !== cur);
+});
+
 const menuItems = computed<MenuItem[]>(() => {
   const items: MenuItem[] = [
     { type: "item", key: "open", label: "Open transcript" },
     { type: "item", key: "resume", label: "Resume", sub: defaultLauncher.value?.label },
   ];
   if (launchers.value.length) {
-    items.push({ type: "header", label: "Resume in" });
-    for (const l of launchers.value) {
-      items.push({ type: "item", key: `launch:${l.id}`, label: l.label, sub: l.kind });
-    }
+    items.push({
+      label: "Resume in",
+      children: launchers.value.map((l) => ({
+        type: "item" as const,
+        key: `launch:${l.id}`,
+        label: l.label,
+        sub: l.kind,
+      })),
+    });
   }
+  items.push({ type: "item", key: "rename", label: "Rename…" });
+  items.push({
+    label: "Color",
+    children: [
+      { type: "item", key: "color:default", label: "None" },
+      ...SESSION_COLORS.map((c) => ({
+        type: "item" as const,
+        key: `color:${c}`,
+        label: colorLabel(c),
+        dot: colorHex(c) ?? undefined,
+      })),
+    ],
+  });
   items.push(
     { type: "divider" },
     { type: "item", key: "copy-cmd", label: "Copy resume command" },
     { type: "item", key: "copy-id", label: "Copy session ID" },
     { type: "item", key: "copy-path", label: "Copy project path" },
-    { type: "divider" },
+  );
+  if (moveTargets.value.length) {
+    items.push({
+      label: "Move to project",
+      children: moveTargets.value.map((p) => ({
+        type: "item" as const,
+        key: `move:${p.cwd}`,
+        label: p.name,
+      })),
+    });
+  }
+  items.push(
     { type: "item", key: "reveal", label: "Reveal in Finder" },
+    { type: "divider" },
+    { type: "item", key: "delete", label: "Delete session", danger: true },
   );
   return items;
 });
+
+const confirmDelete = ref<Session | null>(null);
+const cleanConfirm = ref<{ paths: string[]; title: string; body: string } | null>(null);
+const renameTarget = ref<Session | null>(null);
+const renameValue = ref("");
+const renameInput = ref<HTMLInputElement | null>(null);
+
+watch(renameTarget, async (t) => {
+  if (!t) return;
+  await nextTick();
+  renameInput.value?.focus();
+  renameInput.value?.select();
+});
+
+async function doRename() {
+  const s = renameTarget.value;
+  const title = renameValue.value.trim();
+  renameTarget.value = null;
+  if (!s || !title || title === s.title) return;
+  try {
+    await invoke("set_session_title", { path: s.path, title });
+    await reload();
+    fireToast("Session renamed");
+  } catch (e) {
+    fireToast(`Failed: ${e}`);
+  }
+}
+
+async function doDelete() {
+  const s = confirmDelete.value;
+  confirmDelete.value = null;
+  if (!s) return;
+  try {
+    await invoke("delete_session", { path: s.path });
+    if (selectedId.value === s.id) selectedId.value = null;
+    await reload();
+    fireToast("Session moved to Trash");
+  } catch (e) {
+    fireToast(`Failed: ${e}`);
+  }
+}
+
+async function onClean(action: CleanAction) {
+  try {
+    let paths: string[];
+    let what: string;
+    if (action.mode === "empty") {
+      paths = await invoke<string[]>("find_empty_sessions");
+      what = "empty session";
+    } else {
+      const cutoff = Date.now() - action.days * 86_400_000;
+      paths = sessions.value.filter((s) => s.updated < cutoff).map((s) => s.path);
+      what = `session older than ${action.label}`;
+    }
+    if (!paths.length) {
+      fireToast("Nothing to clean");
+      return;
+    }
+    const n = paths.length;
+    cleanConfirm.value = {
+      paths,
+      title: `Clean ${n} ${what}${n > 1 ? "s" : ""}?`,
+      body: `${n} transcript${n > 1 ? "s" : ""} will be moved to the Trash. You can restore ${n > 1 ? "them" : "it"} from there.`,
+    };
+  } catch (e) {
+    fireToast(`Failed: ${e}`);
+  }
+}
+
+async function doClean() {
+  const c = cleanConfirm.value;
+  cleanConfirm.value = null;
+  if (!c) return;
+  try {
+    const n = await invoke<number>("trash_sessions", { paths: c.paths });
+    const gone = new Set(c.paths);
+    if (selectedSession.value && gone.has(selectedSession.value.path)) selectedId.value = null;
+    await reload();
+    fireToast(`Moved ${n} session${n > 1 ? "s" : ""} to Trash`);
+  } catch (e) {
+    fireToast(`Failed: ${e}`);
+  }
+}
 
 async function onMenuAction(key: string) {
   const s = menu.value?.session;
@@ -276,6 +411,44 @@ async function onMenuAction(key: string) {
   if (key.startsWith("launch:")) {
     const l = launchers.value.find((x) => x.id === key.slice("launch:".length));
     onResume(s, l);
+    return;
+  }
+  if (key.startsWith("move:")) {
+    const cwd = key.slice("move:".length);
+    const target = projects.value.find((p) => p.cwd === cwd);
+    if (!target) return;
+    try {
+      await invoke<string>("move_session", {
+        path: s.path,
+        targetDir: target.dir,
+        targetCwd: target.cwd,
+      });
+      if (selectedId.value === s.id) selectedId.value = null;
+      await reload();
+      fireToast(`Moved to ${target.name}`);
+    } catch (e) {
+      fireToast(`Failed: ${e}`);
+    }
+    return;
+  }
+  if (key.startsWith("color:")) {
+    const c = key.slice("color:".length);
+    try {
+      await invoke("set_session_color", { path: s.path, color: c });
+      await reload();
+      fireToast(c === "default" ? "Color cleared" : `Color · ${c}`);
+    } catch (e) {
+      fireToast(`Failed: ${e}`);
+    }
+    return;
+  }
+  if (key === "rename") {
+    renameTarget.value = s;
+    renameValue.value = s.title;
+    return;
+  }
+  if (key === "delete") {
+    confirmDelete.value = s;
     return;
   }
   try {
@@ -316,6 +489,7 @@ async function onMenuAction(key: string) {
         @resume="onResume"
         @menu="openMenu"
         @reload="reload"
+        @clean="onClean"
         @open-settings="settingsOpen = true"
       />
       <div v-if="selectedSession" class="viz-pane">
@@ -347,6 +521,7 @@ async function onMenuAction(key: string) {
         :context-title="contextTitle"
         :result-count="resultCount"
         @reload="reload"
+        @clean="onClean"
       />
 
       <div class="list">
@@ -407,6 +582,50 @@ async function onMenuAction(key: string) {
       @select="onMenuAction"
       @close="menu = null"
     />
+
+    <div v-if="renameTarget" class="confirm-overlay" @click="renameTarget = null">
+      <div class="confirm" @click.stop>
+        <div class="confirm-title">Rename session</div>
+        <input
+          ref="renameInput"
+          v-model="renameValue"
+          class="confirm-input"
+          type="text"
+          placeholder="Session title"
+          @keydown.enter="doRename"
+          @keydown.esc="renameTarget = null"
+        />
+        <div class="confirm-actions">
+          <button class="btn" @click="renameTarget = null">Cancel</button>
+          <button class="btn btn-primary" @click="doRename">Rename</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="cleanConfirm" class="confirm-overlay" @click="cleanConfirm = null">
+      <div class="confirm" @click.stop>
+        <div class="confirm-title">{{ cleanConfirm.title }}</div>
+        <p class="confirm-body">{{ cleanConfirm.body }}</p>
+        <div class="confirm-actions">
+          <button class="btn" @click="cleanConfirm = null">Cancel</button>
+          <button class="btn btn-danger" @click="doClean">Move to Trash</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="confirmDelete" class="confirm-overlay" @click="confirmDelete = null">
+      <div class="confirm" @click.stop>
+        <div class="confirm-title">Delete session?</div>
+        <p class="confirm-body">
+          “{{ confirmDelete.title }}” will be moved to the Trash. You can restore it
+          from there.
+        </p>
+        <div class="confirm-actions">
+          <button class="btn" @click="confirmDelete = null">Cancel</button>
+          <button class="btn btn-danger" @click="doDelete">Move to Trash</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -516,5 +735,84 @@ async function onMenuAction(key: string) {
   flex: 1;
   height: 1px;
   background: var(--bd);
+}
+
+/* Delete confirmation dialog */
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+}
+.confirm {
+  width: min(380px, calc(100vw - 48px));
+  background: var(--panel2);
+  border: 1px solid var(--bd2);
+  border-radius: 14px;
+  box-shadow: 0 30px 70px -20px rgba(0, 0, 0, 0.7);
+  padding: 20px;
+}
+.confirm-title {
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--tx);
+  margin-bottom: 8px;
+}
+.confirm-body {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--dim);
+  margin: 0 0 18px;
+}
+.confirm-input {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 4px 0 18px;
+  padding: 9px 11px;
+  border-radius: 8px;
+  border: 1px solid var(--bd2);
+  background: var(--panel);
+  color: var(--tx);
+  font-size: 13.5px;
+  outline: none;
+}
+.confirm-input:focus {
+  border-color: var(--acc);
+}
+.confirm .btn-primary {
+  border-color: transparent;
+  background: var(--acc);
+  color: var(--acc-tx);
+}
+.confirm .btn-primary:hover {
+  filter: brightness(1.05);
+}
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.confirm .btn {
+  padding: 7px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--bd2);
+  background: transparent;
+  color: var(--tx);
+  font-size: 13px;
+  cursor: pointer;
+}
+.confirm .btn:hover {
+  background: var(--hover);
+}
+.confirm .btn-danger {
+  border-color: transparent;
+  background: #e06c5b;
+  color: #fff;
+}
+.confirm .btn-danger:hover {
+  background: #d15947;
 }
 </style>

@@ -10,6 +10,7 @@ export interface Session {
   created: number; // epoch ms
   modified: number; // epoch ms
   path: string;
+  color?: string | null; // Claude "agent-color" (red/blue/…) or null
 }
 
 export type Grouping = "none" | "project" | "date";

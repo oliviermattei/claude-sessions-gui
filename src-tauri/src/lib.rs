@@ -26,6 +26,7 @@ struct Session {
     created: i64,         // first message timestamp (fallback: file mtime)
     modified: i64,        // file modification time
     path: String,         // absolute path to the .jsonl file
+    color: Option<String>, // Claude "agent-color" (red/blue/…) or None
 }
 
 /// Parse an ISO-8601 timestamp (e.g. "2026-06-22T14:45:56.689Z") to epoch millis.
@@ -87,6 +88,7 @@ fn parse_session(path: &Path) -> Option<Session> {
     let id = path.file_stem()?.to_string_lossy().to_string();
 
     let mut custom_title: Option<String> = None;
+    let mut agent_color: Option<String> = None;
     let mut last_prompt: Option<String> = None;
     let mut first_user_text: Option<String> = None;
     let mut cwd: Option<String> = None;
@@ -110,6 +112,12 @@ fn parse_session(path: &Path) -> Option<Session> {
             "custom-title" => {
                 if let Some(t) = v.get("customTitle").and_then(|t| t.as_str()) {
                     custom_title = Some(t.to_string());
+                }
+            }
+            // Claude writes the session's accent color as its own row; last wins.
+            "agent-color" => {
+                if let Some(c) = v.get("agentColor").and_then(|c| c.as_str()) {
+                    agent_color = if c == "default" { None } else { Some(c.to_string()) };
                 }
             }
             "last-prompt" => {
@@ -196,6 +204,7 @@ fn parse_session(path: &Path) -> Option<Session> {
         created: first_ts.unwrap_or(modified),
         modified,
         path: path.to_string_lossy().to_string(),
+        color: agent_color,
     })
 }
 
@@ -471,6 +480,266 @@ fn run_command(command: String, cwd: Option<String>) -> Result<(), String> {
     }
 }
 
+/// Move a session .jsonl (and its `<id>/` sidecar dir, if any) into another
+/// project's folder, rewriting the `cwd` field on every row so that
+/// `claude --resume <id>` resolves the session in the new project.
+///
+/// `target_dir` is the destination project folder (parent of its sessions);
+/// `target_cwd` is the absolute working directory written into the transcript.
+/// Returns the new absolute .jsonl path.
+#[tauri::command]
+fn move_session(path: String, target_dir: String, target_cwd: String) -> Result<String, String> {
+    let src = PathBuf::from(&path);
+    if !src.exists() {
+        return Err("Session file not found".to_string());
+    }
+    let dst_dir = PathBuf::from(&target_dir);
+    if !dst_dir.is_dir() {
+        return Err("Target project folder not found".to_string());
+    }
+    let file_name = src
+        .file_name()
+        .ok_or_else(|| "Invalid session path".to_string())?;
+    let dst = dst_dir.join(file_name);
+    if dst == src {
+        return Ok(path); // already there
+    }
+    if dst.exists() {
+        return Err("A session with this id already exists in the target project".to_string());
+    }
+
+    // Rewrite cwd on every row that carries one, then write the new file.
+    let content = fs::read_to_string(&src).map_err(|e| e.to_string())?;
+    let mut out = String::with_capacity(content.len());
+    for line in content.lines() {
+        if line.trim().is_empty() {
+            out.push('\n');
+            continue;
+        }
+        match serde_json::from_str::<serde_json::Value>(line) {
+            Ok(mut v) => {
+                if v.get("cwd").is_some() {
+                    if let Some(obj) = v.as_object_mut() {
+                        obj.insert(
+                            "cwd".to_string(),
+                            serde_json::Value::String(target_cwd.clone()),
+                        );
+                    }
+                }
+                out.push_str(&serde_json::to_string(&v).map_err(|e| e.to_string())?);
+                out.push('\n');
+            }
+            // Preserve non-JSON lines verbatim rather than dropping data.
+            Err(_) => {
+                out.push_str(line);
+                out.push('\n');
+            }
+        }
+    }
+    fs::write(&dst, out).map_err(|e| e.to_string())?;
+
+    // Move the `<id>/` sidecar directory (subagents, etc.) alongside it.
+    if let (Some(parent), Some(stem)) = (src.parent(), src.file_stem()) {
+        let side = parent.join(stem);
+        if side.is_dir() {
+            let dst_side = dst_dir.join(stem);
+            if !dst_side.exists() {
+                // Rename works within the same filesystem; ignore failures so a
+                // cross-device sidecar doesn't abort the whole move.
+                let _ = fs::rename(&side, &dst_side);
+            }
+        }
+    }
+
+    fs::remove_file(&src).map_err(|e| e.to_string())?;
+    Ok(dst.to_string_lossy().to_string())
+}
+
+/// True if a transcript has zero real user/assistant turns (a stray/empty file
+/// that `list_sessions` never surfaces). Cheap: bails on the first real turn.
+fn is_empty_session(path: &Path) -> bool {
+    let file = match fs::File::open(path) {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+    for line in BufReader::new(file).lines() {
+        let line = match line {
+            Ok(l) if !l.trim().is_empty() => l,
+            _ => continue,
+        };
+        let v: serde_json::Value = match serde_json::from_str(&line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let kind = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        if kind == "user" || kind == "assistant" {
+            let is_meta = v.get("isMeta").and_then(|b| b.as_bool()).unwrap_or(false);
+            let is_side = v.get("isSidechain").and_then(|b| b.as_bool()).unwrap_or(false);
+            if !is_meta && !is_side {
+                return false; // found a real turn → not empty
+            }
+        }
+    }
+    true
+}
+
+/// Scan every project folder for transcripts with no real turns. Returns their
+/// absolute paths (candidates for "Clean empty sessions").
+#[tauri::command]
+fn find_empty_sessions() -> Result<Vec<String>, String> {
+    let root = projects_dir().ok_or_else(|| "Could not resolve home directory".to_string())?;
+    if !root.exists() {
+        return Ok(vec![]);
+    }
+    let mut out = Vec::new();
+    for entry in fs::read_dir(&root).map_err(|e| e.to_string())?.flatten() {
+        let dir = entry.path();
+        if !dir.is_dir() {
+            continue;
+        }
+        let Ok(files) = fs::read_dir(&dir) else { continue };
+        for f in files.flatten() {
+            let p = f.path();
+            if p.extension().and_then(|e| e.to_str()) == Some("jsonl") && is_empty_session(&p) {
+                out.push(p.to_string_lossy().to_string());
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Send many sessions to the trash in one call (each with its `<id>/` sidecar).
+/// Returns how many .jsonl files were trashed.
+#[tauri::command]
+fn trash_sessions(paths: Vec<String>) -> Result<usize, String> {
+    let mut n = 0;
+    for path in paths {
+        let p = PathBuf::from(&path);
+        if !p.exists() {
+            continue;
+        }
+        if let (Some(parent), Some(stem)) = (p.parent(), p.file_stem()) {
+            let side = parent.join(stem);
+            if side.is_dir() {
+                let _ = trash::delete(&side);
+            }
+        }
+        if trash::delete(&p).is_ok() {
+            n += 1;
+        }
+    }
+    Ok(n)
+}
+
+/// Send a session .jsonl (and its `<id>/` sidecar dir, if any) to the OS trash.
+/// Recoverable — nothing is permanently deleted.
+#[tauri::command]
+fn delete_session(path: String) -> Result<(), String> {
+    let p = PathBuf::from(&path);
+    if !p.exists() {
+        return Err("Session file not found".to_string());
+    }
+    if let (Some(parent), Some(stem)) = (p.parent(), p.file_stem()) {
+        let side = parent.join(stem);
+        if side.is_dir() {
+            let _ = trash::delete(&side);
+        }
+    }
+    trash::delete(&p).map_err(|e| e.to_string())
+}
+
+/// Append JSONL rows to a transcript, one per line, without gluing onto a last
+/// line that lacks a trailing newline. Claude reads the last matching row, so
+/// appending is how it sets/overrides title, color, etc.
+fn append_rows(p: &Path, rows: &[serde_json::Value]) -> Result<(), String> {
+    use std::io::{Read, Seek, SeekFrom, Write};
+
+    let needs_nl = {
+        let mut f = fs::File::open(p).map_err(|e| e.to_string())?;
+        let len = f.metadata().map_err(|e| e.to_string())?.len();
+        if len == 0 {
+            false
+        } else {
+            f.seek(SeekFrom::End(-1)).map_err(|e| e.to_string())?;
+            let mut b = [0u8; 1];
+            f.read_exact(&mut b).map_err(|e| e.to_string())?;
+            b[0] != b'\n'
+        }
+    };
+
+    let mut out = String::new();
+    if needs_nl {
+        out.push('\n');
+    }
+    for r in rows {
+        out.push_str(&serde_json::to_string(r).map_err(|e| e.to_string())?);
+        out.push('\n');
+    }
+
+    let mut f = fs::OpenOptions::new()
+        .append(true)
+        .open(p)
+        .map_err(|e| e.to_string())?;
+    f.write_all(out.as_bytes()).map_err(|e| e.to_string())
+}
+
+fn session_id_of(p: &Path) -> String {
+    p.file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default()
+}
+
+/// Set a session's accent color by appending a Claude-native `agent-color` row.
+/// `list_sessions` reads the last such row, so this both sets and overrides.
+/// Pass "default" to clear the color.
+#[tauri::command]
+fn set_session_color(path: String, color: String) -> Result<(), String> {
+    let p = PathBuf::from(&path);
+    if !p.exists() {
+        return Err("Session file not found".to_string());
+    }
+    let id = session_id_of(&p);
+    append_rows(
+        &p,
+        &[serde_json::json!({
+            "type": "agent-color",
+            "agentColor": color,
+            "sessionId": id,
+        })],
+    )
+}
+
+/// Rename a session by appending the two Claude-native rows it writes on rename:
+/// `custom-title` (drives the displayed title) and `agent-name`. Both carry the
+/// same value so Claude's own UI stays consistent.
+#[tauri::command]
+fn set_session_title(path: String, title: String) -> Result<(), String> {
+    let p = PathBuf::from(&path);
+    if !p.exists() {
+        return Err("Session file not found".to_string());
+    }
+    let title = title.trim();
+    if title.is_empty() {
+        return Err("Title cannot be empty".to_string());
+    }
+    let id = session_id_of(&p);
+    append_rows(
+        &p,
+        &[
+            serde_json::json!({
+                "type": "custom-title",
+                "customTitle": title,
+                "sessionId": id,
+            }),
+            serde_json::json!({
+                "type": "agent-name",
+                "agentName": title,
+                "sessionId": id,
+            }),
+        ],
+    )
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -478,7 +747,13 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             list_sessions,
             get_session_messages,
-            run_command
+            run_command,
+            move_session,
+            delete_session,
+            set_session_color,
+            set_session_title,
+            find_empty_sessions,
+            trash_sessions
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
