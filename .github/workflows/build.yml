@@ -1,0 +1,186 @@
+name: Release (Windows, macOS, Linux)
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (without v prefix, e.g. 0.2.0)'
+        required: true
+
+env:
+  PRODUCT: Claude-Sessions
+
+jobs:
+  # Create (or reuse) the GitHub Release once, before matrix jobs append assets.
+  create-release:
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Create release placeholder
+        uses: ncipollo/release-action@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          skipIfReleaseExists: true
+          prerelease: ${{ contains(github.ref_name, 'beta') || contains(github.ref_name, 'alpha') || contains(github.ref_name, 'rc') }}
+          generateReleaseNotes: true
+
+  build:
+    needs: [create-release]
+    # Run even when create-release is skipped (workflow_dispatch has no tag).
+    if: ${{ always() && (needs.create-release.result == 'success' || needs.create-release.result == 'skipped') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu-22.04
+            args: ''
+            os_label: linux-x86_64
+          - platform: ubuntu-22.04-arm
+            args: ''
+            os_label: linux-arm64
+          - platform: macos-latest
+            args: '--target aarch64-apple-darwin'
+            os_label: macOS-arm64
+          - platform: macos-latest
+            args: '--target x86_64-apple-darwin'
+            os_label: macOS-x64
+          - platform: windows-latest
+            args: ''
+            os_label: win
+
+    runs-on: ${{ matrix.platform }}
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Setup mold linker (Linux)
+        if: startsWith(matrix.platform, 'ubuntu')
+        uses: rui314/setup-mold@v1
+
+      - name: Install Linux dependencies
+        if: startsWith(matrix.platform, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building version $VERSION"
+
+      - name: Sync version into manifests
+        shell: bash
+        run: |
+          VERSION="${{ steps.ver.outputs.version }}"
+          npm pkg set version="$VERSION"
+          node -e "
+            const fs=require('fs');
+            const p='src-tauri/tauri.conf.json';
+            const c=JSON.parse(fs.readFileSync(p,'utf8'));
+            c.version='$VERSION';
+            fs.writeFileSync(p, JSON.stringify(c,null,2)+'\n');
+          "
+          node -e "
+            const fs=require('fs');
+            const p='src-tauri/Cargo.toml';
+            let t=fs.readFileSync(p,'utf8');
+            t=t.replace(/^version = \".*\"/m, 'version = \"$VERSION\"');
+            fs.writeFileSync(p,t);
+          "
+
+      - name: Build (Linux)
+        if: startsWith(matrix.platform, 'ubuntu')
+        timeout-minutes: 30
+        run: pnpm tauri build --bundles appimage ${{ matrix.args }}
+
+      - name: Build (macOS)
+        if: matrix.platform == 'macos-latest'
+        timeout-minutes: 30
+        run: pnpm tauri build --bundles dmg ${{ matrix.args }}
+
+      - name: Build (Windows)
+        if: matrix.platform == 'windows-latest'
+        timeout-minutes: 30
+        run: pnpm tauri build --bundles nsis ${{ matrix.args }}
+
+      - name: Collect & rename assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.ver.outputs.version }}"
+          LABEL="${{ matrix.os_label }}"
+          mkdir -p dist-release
+
+          case "$LABEL" in
+            linux-*)
+              src=$(find src-tauri/target -path '*/release/bundle/appimage/*.AppImage' | head -n1)
+              cp "$src" "dist-release/${PRODUCT}-${VERSION}-${LABEL}.AppImage"
+              ;;
+            macOS-*)
+              src=$(find src-tauri/target -path '*/release/bundle/dmg/*.dmg' | head -n1)
+              cp "$src" "dist-release/${PRODUCT}-${VERSION}-${LABEL}.dmg"
+              ;;
+            win)
+              setup=$(find src-tauri/target -path '*/release/bundle/nsis/*-setup.exe' | head -n1)
+              cp "$setup" "dist-release/${PRODUCT}-${VERSION}-win-Setup.exe"
+              portable=$(find src-tauri/target/release -maxdepth 1 -name 'claude-sessions.exe' | head -n1)
+              cp "$portable" "dist-release/${PRODUCT}-${VERSION}-win-portable.exe"
+              ;;
+          esac
+          echo "Assets:"; ls -lh dist-release
+
+      - name: Upload to Release
+        if: github.event_name == 'push'
+        uses: ncipollo/release-action@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag: ${{ github.ref_name }}
+          allowUpdates: true
+          omitBodyDuringUpdate: true
+          omitNameDuringUpdate: true
+          artifacts: dist-release/*
+
+      - name: Upload artifacts (manual runs)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PRODUCT }}-${{ matrix.os_label }}
+          path: dist-release/*
