@@ -96,14 +96,14 @@ Puis mets à jour les **link definitions** en bas du fichier. Remplace la ligne
 l'ancienne :
 
 ```markdown
-[Unreleased]: https://github.com/oliviermattei/claude-sessions/compare/vNEW_VERSION...HEAD
-[NEW_VERSION]: https://github.com/oliviermattei/claude-sessions/compare/vLAST_TAG...vNEW_VERSION
+[Unreleased]: https://github.com/oliviermattei/claude-sessions-gui/compare/vNEW_VERSION...HEAD
+[NEW_VERSION]: https://github.com/oliviermattei/claude-sessions-gui/compare/vLAST_TAG...vNEW_VERSION
 [LAST_TAG_sans_v]: …            # (les lignes existantes restent)
 ```
 
 Pour la toute première release (pas de `LAST_TAG`), la ligne version pointe vers
 le tag :
-`[NEW_VERSION]: https://github.com/oliviermattei/claude-sessions/releases/tag/vNEW_VERSION`.
+`[NEW_VERSION]: https://github.com/oliviermattei/claude-sessions-gui/releases/tag/vNEW_VERSION`.
 
 **Montre le diff de `CHANGELOG.md` à l'utilisateur et demande validation.**
 N'édite ni `package.json`, ni `Cargo.toml`, ni `tauri.conf.json` : le workflow
@@ -123,7 +123,7 @@ git push origin vNEW_VERSION          # ← déclenche build.yml (release multi-
 ```
 
 Puis indique le lien de suivi :
-`https://github.com/oliviermattei/claude-sessions/actions/workflows/build.yml`
+`https://github.com/oliviermattei/claude-sessions-gui/actions/workflows/build.yml`
 et la page release finale.
 
 ## Garde-fous

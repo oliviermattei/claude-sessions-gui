@@ -34,7 +34,7 @@ mind when auditing or contributing:
 Report privately through one of:
 
 1. **GitHub Security Advisories** — preferred. Use
-   [*Report a vulnerability*](https://github.com/oliviermattei/claude-sessions/security/advisories/new)
+   [*Report a vulnerability*](https://github.com/oliviermattei/claude-sessions-gui/security/advisories/new)
    on the repository's Security tab.
 2. **Email** — `hello@feedvox.co`.
 

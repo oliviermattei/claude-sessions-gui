@@ -18,8 +18,8 @@ By participating in this project you agree to abide by our
 
 ## Ways to contribute
 
-- **Report a bug** — open a [bug report](https://github.com/oliviermattei/claude-sessions/issues/new?template=bug_report.yml).
-- **Request a feature** — open a [feature request](https://github.com/oliviermattei/claude-sessions/issues/new?template=feature_request.yml).
+- **Report a bug** — open a [bug report](https://github.com/oliviermattei/claude-sessions-gui/issues/new?template=bug_report.yml).
+- **Request a feature** — open a [feature request](https://github.com/oliviermattei/claude-sessions-gui/issues/new?template=feature_request.yml).
 - **Improve docs** — typo fixes and clarifications are always welcome.
 - **Send code** — pick an open issue (comment first so we don't duplicate work),
   or open one describing what you plan to build before writing a large change.

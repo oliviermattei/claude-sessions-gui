@@ -36,6 +36,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-platform release workflow producing installers for Windows, macOS
   (arm64 + x64) and Linux (x86_64 + arm64).
 
-[Unreleased]: https://github.com/oliviermattei/claude-sessions/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/oliviermattei/claude-sessions/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/oliviermattei/claude-sessions/releases/tag/v0.1.0
+[Unreleased]: https://github.com/oliviermattei/claude-sessions-gui/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/oliviermattei/claude-sessions-gui/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/oliviermattei/claude-sessions-gui/releases/tag/v0.1.0

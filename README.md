@@ -1,10 +1,10 @@
 # Claude Sessions
 
-[![CI](https://github.com/oliviermattei/claude-sessions/actions/workflows/ci.yml/badge.svg)](https://github.com/oliviermattei/claude-sessions/actions/workflows/ci.yml)
-[![Release](https://github.com/oliviermattei/claude-sessions/actions/workflows/build.yml/badge.svg)](https://github.com/oliviermattei/claude-sessions/actions/workflows/build.yml)
-[![Latest release](https://img.shields.io/github/v/release/oliviermattei/claude-sessions?include_prereleases&sort=semver)](https://github.com/oliviermattei/claude-sessions/releases/latest)
+[![CI](https://github.com/oliviermattei/claude-sessions-gui/actions/workflows/ci.yml/badge.svg)](https://github.com/oliviermattei/claude-sessions-gui/actions/workflows/ci.yml)
+[![Release](https://github.com/oliviermattei/claude-sessions-gui/actions/workflows/build.yml/badge.svg)](https://github.com/oliviermattei/claude-sessions-gui/actions/workflows/build.yml)
+[![Latest release](https://img.shields.io/github/v/release/oliviermattei/claude-sessions-gui?include_prereleases&sort=semver)](https://github.com/oliviermattei/claude-sessions-gui/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
-[![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](https://github.com/oliviermattei/claude-sessions/releases/latest)
+[![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](https://github.com/oliviermattei/claude-sessions-gui/releases/latest)
 
 A lightweight local desktop app to browse, search and relaunch your Claude Code
 sessions. Built with **Tauri 2** (Rust backend) + **Vue 3 / Vite** (TypeScript).
