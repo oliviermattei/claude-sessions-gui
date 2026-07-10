@@ -60,7 +60,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -86,7 +86,7 @@ jobs:
         uses: pnpm/action-setup@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: pnpm
@@ -129,6 +129,11 @@ jobs:
       - name: Build (Linux)
         if: startsWith(matrix.platform, 'ubuntu')
         timeout-minutes: 30
+        env:
+          # arm64 AppImage in CI: strip fails cross-arch and AppImage tooling
+          # needs FUSE which the runner lacks — these two env vars are the fix.
+          NO_STRIP: 'true'
+          APPIMAGE_EXTRACT_AND_RUN: '1'
         run: pnpm tauri build --bundles appimage ${{ matrix.args }}
 
       - name: Build (macOS)
