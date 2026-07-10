@@ -9,8 +9,20 @@
 A lightweight local desktop app to browse, search and relaunch your Claude Code
 sessions. Built with **Tauri 2** (Rust backend) + **Vue 3 / Vite** (TypeScript).
 
-The app scans `~/.claude/projects/**/*.jsonl` read-only and never mutates your
-transcripts.
+The app reads your transcripts under `~/.claude/projects/**/*.jsonl`. Browsing,
+search and sorting are strictly read-only. Only the explicit session actions
+write, and never silently:
+
+- **Rename** and **set color** _append_ Claude-native rows (`custom-title`,
+  `agent-name`, `agent-color`) — the same rows Claude Code itself writes. Nothing
+  in the existing transcript is rewritten or removed.
+- **Move** rewrites the working directory into a copy of the transcript, then
+  removes the original.
+- **Delete** sends the `.jsonl` (and its sidecar folder) to the OS trash, so it
+  stays recoverable.
+
+The app never modifies transcript content in place and never touches a file you
+didn't act on.
 
 ## Features
 

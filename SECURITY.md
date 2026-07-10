@@ -16,9 +16,14 @@ upgrade before reporting an issue to confirm it still reproduces.
 A few properties are load-bearing for this app's safety — please keep them in
 mind when auditing or contributing:
 
-- **Read-only access to transcripts.** The app scans
-  `~/.claude/projects/**/*.jsonl` read-only and must never write to, move, or
-  delete user transcripts. A regression that breaks this is a security bug.
+- **No silent mutation of transcripts.** Browsing, search and sorting are
+  strictly read-only. Writes happen only as a direct result of an explicit user
+  action: rename and set-color _append_ Claude-native rows (never rewriting or
+  removing existing content); move rewrites the working directory into a copy and
+  removes the original; delete sends files to the OS trash (recoverable). The app
+  must never modify transcript content in place, and never write to, move, or
+  delete a file the user did not act on. A regression that breaks this is a
+  security bug.
 - **Local-only.** The app performs no network requests to transmit session
   contents. Session data never leaves the user's machine.
 - **User-defined launchers execute commands.** "Resume" launchers run

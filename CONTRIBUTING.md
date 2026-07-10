@@ -81,9 +81,11 @@ src/styles/theme.css   # design tokens (dark/light)
 - **TypeScript**: keep `pnpm build` (which runs `vue-tsc --noEmit`) green — no
   type errors.
 - **Rust**: format with `cargo fmt`; keep `cargo clippy` warning-free.
-- **Read-only guarantee**: the app scans `~/.claude/projects/**/*.jsonl`
-  read-only and must never mutate user transcripts. Any change touching the
-  filesystem must preserve this invariant.
+- **No silent mutation**: browsing/search/sort stay read-only. Writes only happen
+  from explicit user actions — rename/color _append_ Claude-native rows, move
+  rewrites into a copy then removes the original, delete goes to the OS trash
+  (recoverable). Never modify transcript content in place, and never touch a file
+  the user didn't act on. Any change touching the filesystem must preserve this.
 
 ## Commit messages
 

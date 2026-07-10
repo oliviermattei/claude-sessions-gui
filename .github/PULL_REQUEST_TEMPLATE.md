@@ -25,4 +25,5 @@ Keep PRs focused — smaller PRs get reviewed and merged faster.
 - [ ] `cargo fmt --check` and `cargo clippy -- -D warnings` pass for `src-tauri`.
 - [ ] I followed the [Conventional Commits](https://www.conventionalcommits.org/) format.
 - [ ] I updated docs / `CHANGELOG.md` where relevant.
-- [ ] My change preserves the read-only guarantee on `~/.claude` transcripts.
+- [ ] My change keeps browsing read-only and doesn't silently mutate `~/.claude`
+      transcripts (writes only from explicit user actions; no in-place edits).
