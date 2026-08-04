@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Le pied de page affichait toujours `v0.1 · local`, quelle que soit la version
+  installée. La version est désormais injectée depuis `package.json` au moment
+  du build — que le workflow de release renseigne à partir du tag — donc le
+  footer montre la vraie version de la release.
+
 ## [0.2.2] - 2026-07-10
 
 ### Fixed

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useTheme } from "../composables/useTheme";
+import { useAppVersion } from "../composables/useAppVersion";
 
 defineProps<{
   projects: { name: string; path: string; count: number }[];
@@ -13,6 +14,7 @@ const emit = defineEmits<{
 }>();
 
 const { toggleTheme } = useTheme();
+const { versionLabel } = useAppVersion();
 </script>
 
 <template>
@@ -53,7 +55,7 @@ const { toggleTheme } = useTheme();
     </div>
 
     <div class="footer">
-      <span class="ver">v0.1 · local</span>
+      <span class="ver">{{ versionLabel }}</span>
       <button class="icon-btn" title="Toggle theme" @click="toggleTheme">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
           <path
