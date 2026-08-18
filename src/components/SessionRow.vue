@@ -3,11 +3,14 @@ import { computed } from "vue";
 import type { Session } from "../types";
 import { relTime, highlight } from "../lib/format";
 import { colorHex } from "../lib/colors";
+import RetainedIcon from "./RetainedIcon.vue";
 
 const props = defineProps<{
   session: Session;
   selected: boolean;
   query: string;
+  /** Retention window shown in the badge tooltip, e.g. "org policy · 14 days". */
+  policyLabel?: string;
 }>();
 
 const emit = defineEmits<{
@@ -19,6 +22,13 @@ const emit = defineEmits<{
 const parts = computed(() => highlight(props.session.title, props.query));
 const date = computed(() => relTime(props.session.updated));
 const barColor = computed(() => colorHex(props.session.color));
+
+const retainedHint = computed(() => {
+  const window = props.policyLabel ? ` (${props.policyLabel})` : "";
+  return props.session.archived
+    ? `Archived — the transcript was cleaned up${window}; restore it to resume`
+    : `Kept beyond the automatic cleanup${window}`;
+});
 
 function onResume(e: MouseEvent) {
   e.stopPropagation();
@@ -38,9 +48,19 @@ function onResume(e: MouseEvent) {
     <span v-if="barColor" class="cbar" :style="{ background: barColor }"></span>
     <div class="body">
       <div class="title">
-        <span>{{ parts.pre }}</span
-        ><mark v-if="parts.hasHit">{{ parts.hit }}</mark
-        ><span>{{ parts.post }}</span>
+        <span class="ttext">
+          <span>{{ parts.pre }}</span
+          ><mark v-if="parts.hasHit">{{ parts.hit }}</mark
+          ><span>{{ parts.post }}</span>
+        </span>
+        <span
+          v-if="session.retained"
+          class="retained"
+          :class="{ archived: session.archived }"
+          :title="retainedHint"
+        >
+          <RetainedIcon />
+        </span>
       </div>
       <div class="meta">
         <span class="project">
@@ -57,6 +77,10 @@ function onResume(e: MouseEvent) {
         <span class="nowrap">{{ date }}</span>
         <span class="dot"></span>
         <span class="nowrap">{{ session.messages }} messages</span>
+        <template v-if="session.archived">
+          <span class="dot"></span>
+          <span class="nowrap pill">archived</span>
+        </template>
       </div>
     </div>
 
@@ -110,12 +134,38 @@ function onResume(e: MouseEvent) {
   flex: 1;
 }
 .title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   font-size: 14.5px;
   font-weight: 560;
   letter-spacing: -0.2px;
+  min-width: 0;
+}
+/* The text owns the ellipsis so the retention badge is never truncated away. */
+.ttext {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.retained {
+  display: flex;
+  align-items: center;
+  flex: none;
+  color: var(--retain);
+}
+.retained.archived {
+  color: var(--faint);
+}
+.pill {
+  padding: 1px 6px;
+  border-radius: 5px;
+  border: 1px solid var(--bd2);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--faint);
 }
 .meta {
   display: flex;

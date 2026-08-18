@@ -17,6 +17,11 @@
   --dim: #9b9ba4;
   --faint: #66666f;
 
+  /* Retention badge. Deliberately not the accent: a kept session is state, not
+     decoration, so it must stay legible whichever accent is picked. Deeper than
+     the session palette's pastel cyan (#4fb8c9) to read as a distinct mark. */
+  --retain: #35b0a7;
+
   --acc-soft: color-mix(in srgb, var(--acc) 16%, transparent);
   --mark: color-mix(in srgb, var(--acc) 32%, transparent);
 
@@ -63,6 +68,9 @@
   --tx: #1b1b1d;
   --dim: #6a6a72;
   --faint: #a0a09f;
+
+  /* Darkened for contrast on the light panel. */
+  --retain: #0f7c74;
 
   --acc-soft: color-mix(in srgb, var(--acc) 12%, transparent);
   --mark: color-mix(in srgb, var(--acc) 34%, transparent);

@@ -1,22 +1,40 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { useSettings } from "../composables/useSettings";
 import { useTheme } from "../composables/useTheme";
+import { useRetention } from "../composables/useRetention";
+import { useSessions } from "../composables/useSessions";
 
 defineEmits<{ close: [] }>();
 
 const { launchers, defaultLauncherId, addLauncher, removeLauncher, resetLaunchers } =
   useSettings();
 const { accent, theme, layout } = useTheme();
+const { policy } = useRetention();
+const { sessions } = useSessions();
 
 const ACCENTS = ["#d97757", "#8a63d2", "#2a78d6", "#1f8a5b"];
 
-type Section = "appearance" | "launchers";
+type Section = "appearance" | "launchers" | "retention";
 const section = ref<Section>("appearance");
 const NAV: { key: Section; label: string }[] = [
   { key: "appearance", label: "Appearance" },
   { key: "launchers", label: "Launchers" },
+  { key: "retention", label: "Retention" },
 ];
+
+const retainedCount = computed(() => sessions.value.filter((s) => s.retained).length);
+const archivedCount = computed(() => sessions.value.filter((s) => s.archived).length);
+
+async function revealVault() {
+  if (!policy.value.vault) return;
+  try {
+    await revealItemInDir(policy.value.vault);
+  } catch {
+    /* nothing retained yet — the folder doesn't exist */
+  }
+}
 </script>
 
 <template>
@@ -85,6 +103,50 @@ const NAV: { key: Section; label: string }[] = [
                 <strong>Comfortable</strong> keeps the two-pane view. <strong>Compact</strong>
                 folds every project into a single accordion tree — click a project to reveal
                 its sessions underneath.
+              </p>
+            </section>
+          </template>
+
+          <!-- RETENTION -->
+          <template v-else-if="section === 'retention'">
+            <section>
+              <h3>Automatic cleanup</h3>
+              <p class="hint">
+                Claude Code deletes any transcript left untouched for
+                <strong>{{ policy.days }} days</strong
+                >{{
+                  policy.managed
+                    ? " — set by managed settings, so it can't be raised locally."
+                    : "."
+                }}
+                A session marked <strong>Keep beyond cleanup</strong> stays out of
+                reach: its timestamp is refreshed on every launch of this app, and a
+                copy is mirrored into a vault outside
+                <code>~/.claude/projects</code>.
+              </p>
+              <p class="hint">
+                Open this app at least once per period and the session never moves. If
+                nobody does, the vault copy is what survives — restore it from the
+                session's context menu to make it resumable again.
+              </p>
+            </section>
+
+            <section>
+              <div class="section-head">
+                <h3>Vault</h3>
+                <div class="head-actions">
+                  <button class="ghost" :disabled="!policy.vault" @click="revealVault">
+                    Reveal
+                  </button>
+                </div>
+              </div>
+              <p class="hint path">{{ policy.vault || "unavailable" }}</p>
+              <p class="hint">
+                {{ retainedCount }} session{{ retainedCount === 1 ? "" : "s" }} kept<template
+                  v-if="archivedCount"
+                >
+                  · {{ archivedCount }} served from the vault</template
+                >.
               </p>
             </section>
           </template>
@@ -275,6 +337,18 @@ section h3 {
 }
 .layout-hint {
   margin: 10px 0 0;
+}
+/* Vault location: long, breakable, and copy-pasteable. */
+.hint.path {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--faint);
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.ghost:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 .hint code {
   font-family: var(--mono);

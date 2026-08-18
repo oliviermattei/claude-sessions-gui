@@ -18,6 +18,7 @@ import TranscriptViewer from "./components/TranscriptViewer.vue";
 import ContextMenu, { type MenuItem } from "./components/ContextMenu.vue";
 import { useTheme } from "./composables/useTheme";
 import { useTranscript } from "./composables/useTranscript";
+import { useRetention } from "./composables/useRetention";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { invoke } from "@tauri-apps/api/core";
 import { SESSION_COLORS, colorHex, colorLabel } from "./lib/colors";
@@ -25,6 +26,7 @@ import { SESSION_COLORS, colorHex, colorLabel } from "./lib/colors";
 const { sessions, loading, error, reload } = useSessions();
 const { resume, launchers, defaultLauncher } = useSettings();
 const { layout } = useTheme();
+const { policy, policyLabel, setRetained, restore } = useRetention();
 const {
   transcript,
   loading: transcriptLoading,
@@ -215,6 +217,12 @@ const emptyMsg = computed(() =>
 async function onResume(s: Session, launcher?: (typeof launchers.value)[number]) {
   selectedId.value = s.id;
   try {
+    // The CLI can only resume what sits in ~/.claude/projects, so an archived
+    // session is put back first — resuming it is exactly why it was kept.
+    if (s.archived) {
+      await restore(s);
+      await reload();
+    }
     const status = await resume(s, launcher);
     fireToast(status);
   } catch (e) {
@@ -245,6 +253,9 @@ onMounted(() => {
 const projects = computed(() => {
   const map = new Map<string, { cwd: string; name: string; dir: string }>();
   for (const s of sessions.value) {
+    // An archived session's path points into the vault, so it must never be the
+    // one that defines a project's folder — a move would land in the vault.
+    if (s.archived) continue;
     if (!map.has(s.project)) {
       const dir = s.path.replace(/[\\/][^\\/]*$/, "");
       map.set(s.project, { cwd: s.project, name: s.projectName, dir });
@@ -254,9 +265,12 @@ const projects = computed(() => {
 });
 
 // Move targets = every project other than the right-clicked session's own.
+// An archived session lives in the vault, not in a project folder, so there is
+// nothing to move until it has been restored.
 const moveTargets = computed(() => {
-  const cur = menu.value?.session.project;
-  return projects.value.filter((p) => p.cwd !== cur);
+  const s = menu.value?.session;
+  if (!s || s.archived) return [];
+  return projects.value.filter((p) => p.cwd !== s.project);
 });
 
 const menuItems = computed<MenuItem[]>(() => {
@@ -304,8 +318,32 @@ const menuItems = computed<MenuItem[]>(() => {
       })),
     });
   }
+  items.push({ type: "item", key: "reveal", label: "Reveal in Finder" });
+
+  // Retention: opt a session out of Claude Code's automatic cleanup, and offer
+  // to bring back one that was already cleaned up.
+  const s = menu.value?.session;
+  items.push({ type: "divider" });
+  if (s?.archived) {
+    // The vault copy is all that's left of an archived session, so releasing it
+    // here would be a silent delete. Restoring, or deleting on purpose (which
+    // confirms first), are the only two ways out.
+    items.push({
+      type: "item",
+      key: "restore",
+      label: "Restore to projects",
+      sub: "resumable again",
+    });
+  } else {
+    items.push({
+      type: "item",
+      key: "retain",
+      label: s?.retained ? "Stop keeping" : "Keep beyond cleanup",
+      sub: s?.retained ? "cleanup applies again" : policyLabel(),
+    });
+  }
+
   items.push(
-    { type: "item", key: "reveal", label: "Reveal in Finder" },
     { type: "divider" },
     { type: "item", key: "delete", label: "Delete session", danger: true },
   );
@@ -433,6 +471,31 @@ async function onMenuAction(key: string) {
     }
     return;
   }
+  if (key === "retain") {
+    const on = !s.retained;
+    try {
+      await setRetained(s, on);
+      await reload();
+      fireToast(
+        on
+          ? "Kept beyond cleanup · archived to the vault"
+          : `Released · the ${policy.value.days}-day cleanup applies again`,
+      );
+    } catch (e) {
+      fireToast(`Failed: ${e}`);
+    }
+    return;
+  }
+  if (key === "restore") {
+    try {
+      await restore(s);
+      await reload();
+      fireToast("Restored to ~/.claude/projects");
+    } catch (e) {
+      fireToast(`Failed: ${e}`);
+    }
+    return;
+  }
   if (key === "rename") {
     renameTarget.value = s;
     renameValue.value = s.title;
@@ -476,6 +539,7 @@ async function onMenuAction(key: string) {
         v-model:sort="compactSort"
         :sessions="sessions"
         :selected-id="selectedId"
+        :policy-label="policyLabel()"
         @select="selectedId = $event"
         @resume="onResume"
         @menu="openMenu"
@@ -540,6 +604,7 @@ async function onMenuAction(key: string) {
               :session="s"
               :selected="selectedId === s.id"
               :query="query"
+              :policy-label="policyLabel()"
               @select="selectedId = s.id"
               @resume="onResume(s)"
               @menu="openMenu(s, $event)"
@@ -610,6 +675,10 @@ async function onMenuAction(key: string) {
         <p class="confirm-body">
           “{{ confirmDelete.title }}” will be moved to the Trash. You can restore it
           from there.
+        </p>
+        <p v-if="confirmDelete.retained" class="confirm-body warn">
+          It is currently kept beyond the automatic cleanup — its archived copy will
+          be deleted too.
         </p>
         <div class="confirm-actions">
           <button class="btn" @click="confirmDelete = null">Cancel</button>
@@ -757,6 +826,10 @@ async function onMenuAction(key: string) {
   line-height: 1.5;
   color: var(--dim);
   margin: 0 0 18px;
+}
+.confirm-body.warn {
+  margin-top: -10px;
+  color: var(--faint);
 }
 .confirm-input {
   width: 100%;

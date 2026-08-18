@@ -6,11 +6,27 @@ import { SORTS, sortDef } from "../lib/sort";
 import { colorHex } from "../lib/colors";
 import type { CleanAction } from "./TopBar.vue";
 import { useTheme } from "../composables/useTheme";
+import RetainedIcon from "./RetainedIcon.vue";
 
 const props = defineProps<{
   sessions: Session[];
   selectedId: string | null;
+  /** Retention window shown in the badge tooltip, e.g. "org policy · 14 days". */
+  policyLabel?: string;
 }>();
+
+function retainedHint(s: Session): string {
+  const window = props.policyLabel ? ` (${props.policyLabel})` : "";
+  return s.archived
+    ? `Archived — the transcript was cleaned up${window}; restore it to resume`
+    : `Kept beyond the automatic cleanup${window}`;
+}
+
+// The compact leaf is too narrow to carry the message count and date without
+// squeezing the title, so they move into the row's tooltip instead.
+function leafHint(s: Session): string {
+  return `${s.project}\n${s.messages} messages · ${relTime(s.updated)}`;
+}
 
 const query = defineModel<string>("query", { required: true });
 const grouping = defineModel<Grouping>("grouping", { required: true });
@@ -215,12 +231,25 @@ function pickSort(key: SortKey) {
           :key="s.id"
           class="leaf flat"
           :class="{ selected: selectedId === s.id }"
-          :title="s.project"
+          :title="leafHint(s)"
           @click="emit('select', s.id)"
           @dblclick="emit('resume', s)"
           @contextmenu.prevent="emit('menu', s, $event)"
         >
-          <span class="glyph" :style="colorHex(s.color) ? { color: colorHex(s.color)! } : undefined">{}</span>
+          <span
+            v-if="s.retained"
+            class="glyph retained"
+            :class="{ archived: s.archived }"
+            :title="retainedHint(s)"
+          >
+            <RetainedIcon :size="12" />
+          </span>
+          <span
+            v-else
+            class="glyph"
+            :style="colorHex(s.color) ? { color: colorHex(s.color)! } : undefined"
+            >{}</span
+          >
           <span class="ltitle">
             <template v-if="highlight(s.title, query).hasHit">
               {{ highlight(s.title, query).pre
@@ -229,7 +258,6 @@ function pickSort(key: SortKey) {
             </template>
             <template v-else>{{ s.title }}</template>
           </span>
-          <span class="lmeta">{{ s.messages }} · {{ relTime(s.updated) }}</span>
           <button class="resume" title="Resume" @click.stop="emit('resume', s)">
             <svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor">
               <path d="M2.5 1.6c0-.4.44-.65.78-.43l6.4 4.4c.3.2.3.66 0 .86l-6.4 4.4a.5.5 0 0 1-.78-.43V1.6Z" />
@@ -259,11 +287,25 @@ function pickSort(key: SortKey) {
             :key="s.id"
             class="leaf"
             :class="{ selected: selectedId === s.id }"
+            :title="leafHint(s)"
             @click="emit('select', s.id)"
             @dblclick="emit('resume', s)"
             @contextmenu.prevent="emit('menu', s, $event)"
           >
-            <span class="glyph" :style="colorHex(s.color) ? { color: colorHex(s.color)! } : undefined">{}</span>
+            <span
+              v-if="s.retained"
+              class="glyph retained"
+              :class="{ archived: s.archived }"
+              :title="retainedHint(s)"
+            >
+              <RetainedIcon :size="12" />
+            </span>
+            <span
+              v-else
+              class="glyph"
+              :style="colorHex(s.color) ? { color: colorHex(s.color)! } : undefined"
+              >{}</span
+            >
             <span class="ltitle">
               <template v-if="highlight(s.title, query).hasHit">
                 {{ highlight(s.title, query).pre
@@ -272,7 +314,6 @@ function pickSort(key: SortKey) {
               </template>
               <template v-else>{{ s.title }}</template>
             </span>
-            <span class="lmeta">{{ s.messages }} · {{ relTime(s.updated) }}</span>
             <button class="resume" title="Resume" @click.stop="emit('resume', s)">
               <svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor">
                 <path d="M2.5 1.6c0-.4.44-.65.78-.43l6.4 4.4c.3.2.3.66 0 .86l-6.4 4.4a.5.5 0 0 1-.78-.43V1.6Z" />
@@ -313,6 +354,10 @@ function pickSort(key: SortKey) {
 .compact {
   height: 100%;
   min-height: 0;
+  /* This aside is a grid item, and a `1fr` track's automatic minimum is
+     min-content — without this, one long unbreakable title widens the track past
+     the window instead of being ellipsised. Same guard as App.vue's .viz-pane. */
+  min-width: 0;
   display: flex;
   flex-direction: column;
   background: var(--panel);
@@ -607,10 +652,15 @@ function pickSort(key: SortKey) {
   font-size: 13px;
   color: var(--tx);
 }
-.lmeta {
-  flex: none;
-  font-family: var(--mono);
-  font-size: 10.5px;
+/* Retained sessions take over the glyph slot: the icon replaces the `{}`, so it
+   reads as the row's identity rather than as an extra ornament. */
+.glyph.retained {
+  display: flex;
+  align-items: center;
+  color: var(--retain);
+  opacity: 1;
+}
+.glyph.retained.archived {
   color: var(--faint);
 }
 .resume {

@@ -8,9 +8,25 @@ export interface Session {
   messages: number;
   updated: number; // epoch ms
   created: number; // epoch ms
-  modified: number; // epoch ms
+  modified: number; // epoch ms — last real activity, never the keep-alive stamp
   path: string;
   color?: string | null; // Claude "agent-color" (red/blue/…) or null
+  retained: boolean; // exempted from Claude Code's automatic cleanup
+  archived: boolean; // cleaned up already; `path` points into our vault copy
+}
+
+/** Effective `cleanupPeriodDays` and where retained copies are kept. */
+export interface RetentionPolicy {
+  days: number;
+  /** Set by managed/org settings — the user cannot raise it locally. */
+  managed: boolean;
+  vault: string;
+}
+
+export interface RefreshReport {
+  refreshed: number;
+  archived: number;
+  missing: number;
 }
 
 export type Grouping = "none" | "project" | "date";

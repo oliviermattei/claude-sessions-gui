@@ -4,7 +4,10 @@
 //   1. `list_sessions`  — scan ~/.claude/projects/**/*.jsonl and extract session metadata
 //   2. `run_command`    — spawn a configurable, detached shell command (the "Resume" action)
 //
-// Everything is read-only on the Claude data; we never mutate the .jsonl transcripts.
+// Reads are non-destructive; the only writes are the explicit user actions
+// (rename, color, move, delete) and the retention keep-alive in `retention`.
+
+mod retention;
 
 use serde::Serialize;
 use std::fs;
@@ -16,17 +19,20 @@ use std::time::UNIX_EPOCH;
 /// All timestamps are epoch milliseconds (i64) so the frontend can sort/format freely.
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
-struct Session {
-    id: String,            // session UUID (the .jsonl filename)
-    title: String,         // custom title > last prompt > first user message > "Untitled"
-    project: String,       // absolute cwd, e.g. "D:\\www\\claude-sessions"
-    project_name: String,  // last path segment, e.g. "claude-sessions"
-    messages: u32,         // count of real user/assistant turns
-    updated: i64,          // last message timestamp (fallback: file mtime)
-    created: i64,          // first message timestamp (fallback: file mtime)
-    modified: i64,         // file modification time
-    path: String,          // absolute path to the .jsonl file
-    color: Option<String>, // Claude "agent-color" (red/blue/…) or None
+pub(crate) struct Session {
+    pub id: String,            // session UUID (the .jsonl filename)
+    pub title: String,         // custom title > last prompt > first user message > "Untitled"
+    pub project: String,       // absolute cwd, e.g. "D:\\www\\claude-sessions"
+    pub project_name: String,  // last path segment, e.g. "claude-sessions"
+    pub messages: u32,         // count of real user/assistant turns
+    pub updated: i64,          // last message timestamp (fallback: file mtime)
+    pub created: i64,          // first message timestamp (fallback: file mtime)
+    pub modified: i64,         // last real activity (retained sessions: the true mtime)
+    pub path: String,          // absolute path to the .jsonl file
+    pub color: Option<String>, // Claude "agent-color" (red/blue/…) or None
+    // Both set by `retention::annotate`, never by the parser itself.
+    pub retained: bool, // exempted from Claude Code's automatic cleanup
+    pub archived: bool, // gone from ~/.claude/projects; `path` points into the vault
 }
 
 /// Parse an ISO-8601 timestamp (e.g. "2026-06-22T14:45:56.689Z") to epoch millis.
@@ -37,7 +43,7 @@ fn iso_to_millis(s: &str) -> Option<i64> {
 }
 
 /// File mtime as epoch millis, or 0 if unavailable.
-fn mtime_millis(path: &Path) -> i64 {
+pub(crate) fn mtime_millis(path: &Path) -> i64 {
     fs::metadata(path)
         .and_then(|m| m.modified())
         .ok()
@@ -81,7 +87,7 @@ fn clean_title(raw: &str) -> String {
 }
 
 /// Parse a single .jsonl transcript into a Session, or None if it looks empty/invalid.
-fn parse_session(path: &Path) -> Option<Session> {
+pub(crate) fn parse_session(path: &Path) -> Option<Session> {
     let file = fs::File::open(path).ok()?;
     let reader = BufReader::new(file);
 
@@ -214,6 +220,8 @@ fn parse_session(path: &Path) -> Option<Session> {
         modified,
         path: path.to_string_lossy().to_string(),
         color: agent_color,
+        retained: false,
+        archived: false,
     })
 }
 
@@ -438,7 +446,7 @@ fn get_session_messages(path: String) -> Result<Transcript, String> {
     })
 }
 
-fn projects_dir() -> Option<PathBuf> {
+pub(crate) fn projects_dir() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".claude").join("projects"))
 }
 
@@ -470,6 +478,8 @@ fn list_sessions() -> Result<Vec<Session>, String> {
             }
         }
     }
+    // Flag retained sessions and add back any that now live only in the vault.
+    retention::annotate(&mut out);
     Ok(out)
 }
 
@@ -580,6 +590,11 @@ fn move_session(path: String, target_dir: String, target_cwd: String) -> Result<
     }
 
     fs::remove_file(&src).map_err(|e| e.to_string())?;
+
+    // A retained session must keep being retained at its new path, otherwise the
+    // keep-alive would tick on a path that no longer exists.
+    retention::relocate(&src, &dst, &target_cwd);
+
     Ok(dst.to_string_lossy().to_string())
 }
 
@@ -658,6 +673,7 @@ fn trash_sessions(paths: Vec<String>) -> Result<usize, String> {
             }
         }
         if trash::delete(&p).is_ok() {
+            retention::forget(&p);
             n += 1;
         }
     }
@@ -678,7 +694,11 @@ fn delete_session(path: String) -> Result<(), String> {
             let _ = trash::delete(&side);
         }
     }
-    trash::delete(&p).map_err(|e| e.to_string())
+    trash::delete(&p).map_err(|e| e.to_string())?;
+    // Deleting on purpose beats retention: drop the registry entry and the vault
+    // copy so the session can't reappear as an archived ghost on the next scan.
+    retention::forget(&p);
+    Ok(())
 }
 
 /// Append JSONL rows to a transcript, one per line, without gluing onto a last
@@ -786,7 +806,11 @@ pub fn run() {
             set_session_color,
             set_session_title,
             find_empty_sessions,
-            trash_sessions
+            trash_sessions,
+            retention::retention_policy,
+            retention::set_session_retained,
+            retention::refresh_retained,
+            retention::restore_retained
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

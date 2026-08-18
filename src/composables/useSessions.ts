@@ -1,6 +1,7 @@
 import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { Session } from "../types";
+import { keepAlive } from "./useRetention";
 
 const sessions = ref<Session[]>([]);
 const loading = ref(false);
@@ -11,6 +12,10 @@ async function load() {
   loading.value = true;
   error.value = null;
   try {
+    // Keep-alive first: retained transcripts get a fresh mtime (and a fresh
+    // vault copy when they changed) before we read the list back, so the app
+    // never lists a session it was about to rescue.
+    await keepAlive();
     sessions.value = await invoke<Session[]>("list_sessions");
     loadedOnce = true;
   } catch (e) {
