@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-18
+
+### Added
+
+- Action **« Keep beyond cleanup »** dans le menu contextuel : exempte une session
+  du nettoyage automatique de Claude Code, qui supprime tout transcript dont la
+  date de modification dépasse `cleanupPeriodDays` (14 jours en réglages managés),
+  sidecar `subagents/*.jsonl` compris. Deux mécanismes appliqués ensemble : un
+  **keep-alive** qui rafraîchit la date du transcript et de son sidecar au
+  démarrage de l'app puis toutes les 6 h — la session reste en place et
+  reprenable —, et une **copie d'archive** dans un coffre hors de
+  `~/.claude/projects`, qui la préserve même si l'app n'est pas ouverte pendant
+  une période entière. Une session qui n'existe plus que dans le coffre est
+  listée comme archivée et peut être restaurée, ce qui se fait aussi
+  automatiquement quand on la reprend. Libérer une session lui rend sa date
+  d'origine : le nettoyage s'applique de nouveau comme si elle n'avait jamais
+  été retenue.
+- Panneau **Retention** dans les Réglages : `cleanupPeriodDays` effectif et
+  emplacement du coffre.
+
+### Changed
+
+- Vue compacte : les métadonnées (messages, date) passent dans l'infobulle de la
+  ligne pour laisser la place au titre, désormais tronqué en ellipse au lieu
+  d'élargir la colonne.
+- Le tampon keep-alive ne remonte jamais dans l'interface : la date de dernière
+  activité réelle est conservée à part, et une modification que l'app n'a pas
+  écrite est reconnue comme une vraie activité.
+- Mise à jour des dépendances internes : Vite 6→8, Vue, `vue-tsc`,
+  `@vitejs/plugin-vue`, `marked`, `serde`/`serde_json` (backend Rust). Aucun
+  changement fonctionnel visible.
+
 ## [0.2.2] - 2026-07-10
 
 ### Fixed
@@ -52,7 +84,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-platform release workflow producing installers for Windows, macOS
   (arm64 + x64) and Linux (x86_64 + arm64).
 
-[Unreleased]: https://github.com/oliviermattei/claude-sessions-gui/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/oliviermattei/claude-sessions-gui/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/oliviermattei/claude-sessions-gui/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/oliviermattei/claude-sessions-gui/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/oliviermattei/claude-sessions-gui/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/oliviermattei/claude-sessions-gui/compare/v0.1.0...v0.2.0
