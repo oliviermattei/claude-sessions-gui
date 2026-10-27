@@ -106,8 +106,17 @@ le tag :
 `[NEW_VERSION]: https://github.com/oliviermattei/claude-sessions-gui/releases/tag/vNEW_VERSION`.
 
 **Montre le diff de `CHANGELOG.md` à l'utilisateur et demande validation.**
-N'édite ni `package.json`, ni `Cargo.toml`, ni `tauri.conf.json` : le workflow
-synchronise la version depuis le tag.
+Puis écris la version dans tous les manifestes (`package.json`,
+`src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`) :
+
+```bash
+node scripts/bump-version.mjs NEW_VERSION
+node scripts/bump-version.mjs --check vNEW_VERSION
+```
+
+Le workflow ne patche plus la version : il **refuse** un tag que ces fichiers ne
+portent pas. C'est cette version que l'app affiche et que l'auto-update compare
+à `latest.json` (voir `docs/releasing.md`).
 
 ## 6. Commit, tag, push (APRÈS confirmation explicite)
 
@@ -115,8 +124,8 @@ Le push est une action externe irréversible. Récapitule (version, nb de commit
 sections) et demande une confirmation claire avant de lancer :
 
 ```bash
-git add CHANGELOG.md
-git commit -m "docs: changelog vNEW_VERSION"
+git add CHANGELOG.md package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
+git commit -m "chore(release): NEW_VERSION"
 git push
 git tag vNEW_VERSION
 git push origin vNEW_VERSION          # ← déclenche build.yml (release multi-OS)

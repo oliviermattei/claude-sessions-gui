@@ -63,6 +63,11 @@ watch(
 );
 watch(defaultLauncherId, (v) => localStorage.setItem(STORAGE_DEFAULT, v));
 
+// Session ids are UUIDs; a folder may hold spaces and brackets but none of the
+// quote, expansion or chaining characters of cmd, PowerShell and sh.
+const SAFE_ID = /^[A-Za-z0-9_-]+$/;
+const UNSAFE_CWD = /["'`$%&|<>^;!\r\n]/;
+
 /** Plain substitution (for run / clipboard). */
 function fill(template: string, s: Session): string {
   return template.replaceAll("{cwd}", s.project).replaceAll("{id}", s.id);
@@ -107,7 +112,14 @@ export function useSettings() {
       return `${l.label}  ·  ${s.projectName}`;
     }
 
-    // run
+    // run — {cwd} and {id} come from the transcript and are pasted verbatim into
+    // a `cmd /C` / `sh -c` line, so refuse anything that could break out of the
+    // template's quoting and chain another command.
+    if (!SAFE_ID.test(s.id) || UNSAFE_CWD.test(s.project)) {
+      throw new Error(
+        "this session's folder or id has shell characters — use “Copy command” instead",
+      );
+    }
     await invoke("run_command", { command: fill(l.template, s), cwd: s.project });
     return `${l.label}  ·  ${s.projectName}`;
   }

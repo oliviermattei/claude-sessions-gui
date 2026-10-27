@@ -111,7 +111,9 @@ get merged fastest.
 
 ## Releasing
 
-Releases are automated. Maintainers only. Steps:
+Releases are automated. Maintainers only. The full procedure, including the
+one-time updater key setup, is in [`docs/releasing.md`](./docs/releasing.md).
+Steps:
 
 1. **Update the changelog.** In [`CHANGELOG.md`](./CHANGELOG.md), move the
    `## [Unreleased]` items under a new dated section header matching the version
@@ -125,13 +127,20 @@ Releases are automated. Maintainers only. Steps:
    link at the bottom. The release workflow extracts the section whose header
    matches the tag version verbatim, so the header **must** read `## [0.2.0]`.
 
-2. **Tag and push.** Pushing a `v*` tag (e.g. `v0.2.0`) triggers
+2. **Set the version.** Run `node scripts/bump-version.mjs 0.2.0` and commit the
+   result with the changelog. It writes the version into `package.json`,
+   `tauri.conf.json`, `Cargo.toml` and `Cargo.lock`; the release refuses a tag
+   these files don't match.
+
+3. **Tag and push.** Pushing a `v*` tag (e.g. `v0.2.0`) triggers
    [`.github/workflows/build.yml`](./.github/workflows/build.yml), which:
+   - builds installers for Windows, macOS (arm64 + x64) and Linux
+     (x86_64 + arm64), plus the signed updater bundles and `latest.json`;
    - extracts the `## [0.2.0]` section from `CHANGELOG.md` and uses it as the
      GitHub Release body (so the changelog appears right above the downloadable
      assets), with auto-generated commit notes appended below it;
-   - builds installers for Windows, macOS (arm64 + x64) and Linux
-     (x86_64 + arm64) and attaches them to that release.
+   - publishes the release once every file is uploaded, which offers the update
+     to installed apps.
 
 If no `## [<version>]` section exists for the tag, the release is still created
 but its body falls back to a "no changelog entry" placeholder — so don't skip

@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Mises à jour automatiques** : l'app vérifie les GitHub Releases au démarrage
+  puis toutes les 6 h, et propose « Restart to update » quand une nouvelle
+  version est publiée. Le paquet est vérifié par signature avant installation.
+  L'exe portable Windows ne se met pas à jour seul. Les installations en 0.3.0
+  et avant doivent installer à la main la première version qui embarque
+  l'updater.
+
+### Fixed
+
+- Le pied de page affiche la vraie version de l'app au lieu de « v0.1 » figé.
+- Cliquer un lien dans un transcript ouvre désormais le navigateur système au
+  lieu de remplacer l'app par la page (sans retour possible). Les liens non
+  web (`javascript:`…) sont ignorés, et une Content Security Policy est en place.
+- L'interface ne se fige plus pendant le scan des sessions : les commandes du
+  backend tournent hors du thread principal.
+- Déplacer une session vers un projet situé sur un autre disque ne perd plus
+  ses sous-agents ; si leur copie échoue, le déplacement est annulé.
+- « Resume » refuse un dossier ou un id de session contenant des caractères
+  shell (guillemets, `&`, `|`, `$`…) qui pourraient injecter une commande, et
+  propose « Copy command » à la place.
+
 ## [0.3.0] - 2026-08-18
 
 ### Added

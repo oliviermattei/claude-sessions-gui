@@ -406,7 +406,7 @@ fn parse_transcript_file(path: &Path) -> Vec<Message> {
 
 /// Read a full session transcript plus any subagent sidechains stored alongside it
 /// at `<parent>/<session-id>/subagents/*.jsonl`.
-#[tauri::command]
+#[tauri::command(async)]
 fn get_session_messages(path: String) -> Result<Transcript, String> {
     let p = PathBuf::from(&path);
     if !p.exists() {
@@ -451,7 +451,7 @@ pub(crate) fn projects_dir() -> Option<PathBuf> {
 }
 
 /// Scan every project folder for .jsonl transcripts and return parsed sessions.
-#[tauri::command]
+#[tauri::command(async)]
 fn list_sessions() -> Result<Vec<Session>, String> {
     let root = projects_dir().ok_or_else(|| "Could not resolve home directory".to_string())?;
     if !root.exists() {
@@ -486,7 +486,7 @@ fn list_sessions() -> Result<Vec<Session>, String> {
 /// Spawn a detached shell command (the "Resume" action). The frontend builds the
 /// full command line from an editable template, so any launcher works without
 /// recompiling: Warp, Windows Terminal, PowerShell, custom, etc.
-#[tauri::command]
+#[tauri::command(async)]
 fn run_command(command: String, cwd: Option<String>) -> Result<(), String> {
     if command.trim().is_empty() {
         return Err("Empty command".to_string());
@@ -525,7 +525,7 @@ fn run_command(command: String, cwd: Option<String>) -> Result<(), String> {
 /// `target_dir` is the destination project folder (parent of its sessions);
 /// `target_cwd` is the absolute working directory written into the transcript.
 /// Returns the new absolute .jsonl path.
-#[tauri::command]
+#[tauri::command(async)]
 fn move_session(path: String, target_dir: String, target_cwd: String) -> Result<String, String> {
     let src = PathBuf::from(&path);
     if !src.exists() {
@@ -582,9 +582,17 @@ fn move_session(path: String, target_dir: String, target_cwd: String) -> Result<
         if side.is_dir() {
             let dst_side = dst_dir.join(stem);
             if !dst_side.exists() {
-                // Rename works within the same filesystem; ignore failures so a
-                // cross-device sidecar doesn't abort the whole move.
-                let _ = fs::rename(&side, &dst_side);
+                // Rename only works within one filesystem; across devices fall
+                // back to copy + delete. If even that fails, undo the move rather
+                // than leave the subagents orphaned in the old project.
+                if fs::rename(&side, &dst_side).is_err() {
+                    if let Err(e) = retention::copy_dir(&side, &dst_side) {
+                        let _ = fs::remove_dir_all(&dst_side);
+                        let _ = fs::remove_file(&dst);
+                        return Err(format!("Could not move the session's subagents: {e}"));
+                    }
+                    let _ = fs::remove_dir_all(&side);
+                }
             }
         }
     }
@@ -631,7 +639,7 @@ fn is_empty_session(path: &Path) -> bool {
 
 /// Scan every project folder for transcripts with no real turns. Returns their
 /// absolute paths (candidates for "Clean empty sessions").
-#[tauri::command]
+#[tauri::command(async)]
 fn find_empty_sessions() -> Result<Vec<String>, String> {
     let root = projects_dir().ok_or_else(|| "Could not resolve home directory".to_string())?;
     if !root.exists() {
@@ -658,7 +666,7 @@ fn find_empty_sessions() -> Result<Vec<String>, String> {
 
 /// Send many sessions to the trash in one call (each with its `<id>/` sidecar).
 /// Returns how many .jsonl files were trashed.
-#[tauri::command]
+#[tauri::command(async)]
 fn trash_sessions(paths: Vec<String>) -> Result<usize, String> {
     let mut n = 0;
     for path in paths {
@@ -682,7 +690,7 @@ fn trash_sessions(paths: Vec<String>) -> Result<usize, String> {
 
 /// Send a session .jsonl (and its `<id>/` sidecar dir, if any) to the OS trash.
 /// Recoverable — nothing is permanently deleted.
-#[tauri::command]
+#[tauri::command(async)]
 fn delete_session(path: String) -> Result<(), String> {
     let p = PathBuf::from(&path);
     if !p.exists() {
@@ -745,7 +753,7 @@ fn session_id_of(p: &Path) -> String {
 /// Set a session's accent color by appending a Claude-native `agent-color` row.
 /// `list_sessions` reads the last such row, so this both sets and overrides.
 /// Pass "default" to clear the color.
-#[tauri::command]
+#[tauri::command(async)]
 fn set_session_color(path: String, color: String) -> Result<(), String> {
     let p = PathBuf::from(&path);
     if !p.exists() {
@@ -765,7 +773,7 @@ fn set_session_color(path: String, color: String) -> Result<(), String> {
 /// Rename a session by appending the two Claude-native rows it writes on rename:
 /// `custom-title` (drives the displayed title) and `agent-name`. Both carry the
 /// same value so Claude's own UI stays consistent.
-#[tauri::command]
+#[tauri::command(async)]
 fn set_session_title(path: String, title: String) -> Result<(), String> {
     let p = PathBuf::from(&path);
     if !p.exists() {
@@ -797,6 +805,10 @@ fn set_session_title(path: String, title: String) -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        // Self-update from the GitHub Releases' `latest.json` (see docs/releasing.md),
+        // and the restart that follows an install.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             list_sessions,
             get_session_messages,

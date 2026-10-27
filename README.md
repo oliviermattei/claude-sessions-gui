@@ -41,6 +41,9 @@ didn't act on.
   summary timestamp to sort on.)_
 - **Dark / light** themes with a configurable accent color.
 - **Configurable Resume launchers** (see below).
+- **Automatic updates**: installed apps check GitHub Releases at startup and
+  offer to restart on a new version (signed and verified). The Windows
+  _portable_ exe does not update itself — download the new one by hand.
 
 ## Prerequisites
 

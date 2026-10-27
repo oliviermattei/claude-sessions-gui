@@ -24,6 +24,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 // --- paths -----------------------------------------------------------------
@@ -98,6 +99,16 @@ impl Registry {
     }
 }
 
+/// Commands run off the main thread, so a keep-alive pass can overlap a user
+/// action. Every load → mutate → save of the registry holds this lock, otherwise
+/// the last writer would silently drop the other's changes.
+static REGISTRY_LOCK: Mutex<()> = Mutex::new(());
+
+fn lock_registry() -> MutexGuard<'static, ()> {
+    // A panic mid-update leaves nothing worse than what is on disk: keep going.
+    REGISTRY_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 // --- mtime helpers ---------------------------------------------------------
 
 fn set_mtime(p: &Path, t: SystemTime) -> Result<(), String> {
@@ -147,7 +158,7 @@ fn touch_tree(jsonl: &Path, t: SystemTime) -> Result<i64, String> {
 
 // --- vault -----------------------------------------------------------------
 
-fn copy_dir(src: &Path, dst: &Path) -> Result<(), String> {
+pub(crate) fn copy_dir(src: &Path, dst: &Path) -> Result<(), String> {
     fs::create_dir_all(dst).map_err(|e| e.to_string())?;
     for e in fs::read_dir(src).map_err(|e| e.to_string())?.flatten() {
         let from = e.path();
@@ -214,6 +225,7 @@ fn id_of(jsonl: &Path) -> String {
 /// Flag retained sessions, hide the keep-alive from the UI's "modified" value,
 /// and append sessions that now exist only in the vault.
 pub(crate) fn annotate(sessions: &mut Vec<Session>) {
+    let _guard = lock_registry();
     let mut reg = Registry::load();
     if reg.entries.is_empty() {
         return;
@@ -319,7 +331,7 @@ fn managed_settings_path() -> PathBuf {
 /// The retention window sessions are actually judged against. Precedence follows
 /// Claude Code's own: managed policy, then org remote settings, then the user's
 /// settings.json, else the 30-day default.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn retention_policy() -> RetentionPolicy {
     let vault = vault_dir()
         .map(|p| p.to_string_lossy().to_string())
@@ -360,13 +372,14 @@ pub fn retention_policy() -> RetentionPolicy {
 ///
 /// Releasing restores the transcript's true mtime, so the org's retention
 /// applies again exactly as if the session had never been retained.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_session_retained(path: String, retained: bool) -> Result<(), String> {
     let p = PathBuf::from(&path);
     let id = id_of(&p);
     if id.is_empty() {
         return Err("Invalid session path".to_string());
     }
+    let _guard = lock_registry();
     let mut reg = Registry::load();
 
     if !retained {
@@ -419,8 +432,9 @@ pub struct RefreshReport {
 /// Keep-alive pass: run it on every app start, and periodically while it runs.
 /// Each retained transcript gets a fresh mtime and, when it changed since the
 /// last pass, a fresh vault copy.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn refresh_retained() -> Result<RefreshReport, String> {
+    let _guard = lock_registry();
     let mut reg = Registry::load();
     let mut report = RefreshReport {
         refreshed: 0,
@@ -475,8 +489,9 @@ pub fn refresh_retained() -> Result<RefreshReport, String> {
 
 /// Copy a vault-only session back into ~/.claude/projects so the CLI can resume
 /// it again. Returns its new live path.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn restore_retained(id: String) -> Result<String, String> {
+    let _guard = lock_registry();
     let mut reg = Registry::load();
     let e = reg
         .entries
@@ -516,6 +531,7 @@ pub(crate) fn forget(jsonl: &Path) {
     if id.is_empty() {
         return;
     }
+    let _guard = lock_registry();
     let mut reg = Registry::load();
     if let Some(e) = reg.entries.remove(&id) {
         drop_vault(&e.project_dir, &e.id);
@@ -529,6 +545,7 @@ pub(crate) fn relocate(old: &Path, new: &Path, cwd: &str) {
     if id.is_empty() {
         return;
     }
+    let _guard = lock_registry();
     let mut reg = Registry::load();
     let Some(e) = reg.entries.get_mut(&id) else {
         return;

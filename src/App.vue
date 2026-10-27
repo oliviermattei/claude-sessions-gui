@@ -16,10 +16,11 @@ import SettingsModal from "./components/SettingsModal.vue";
 import CompactView from "./components/CompactView.vue";
 import TranscriptViewer from "./components/TranscriptViewer.vue";
 import ContextMenu, { type MenuItem } from "./components/ContextMenu.vue";
+import UpdateToast from "./components/UpdateToast.vue";
 import { useTheme } from "./composables/useTheme";
 import { useTranscript } from "./composables/useTranscript";
 import { useRetention } from "./composables/useRetention";
-import { revealItemInDir } from "@tauri-apps/plugin-opener";
+import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { invoke } from "@tauri-apps/api/core";
 import { SESSION_COLORS, colorHex, colorLabel } from "./lib/colors";
 
@@ -245,6 +246,19 @@ onMounted(() => {
     const t = e.target as HTMLElement | null;
     if (t?.closest("input, textarea, [contenteditable='true']")) return;
     e.preventDefault();
+  });
+
+  // Links rendered from transcript markdown must never navigate the webview: the
+  // window has no back button, and a `javascript:` URL would run with access to
+  // the Tauri commands. Web and mail links go to the system browser instead.
+  window.addEventListener("click", (e) => {
+    const a = (e.target as HTMLElement | null)?.closest("a[href]");
+    if (!a) return;
+    e.preventDefault();
+    const href = a.getAttribute("href") ?? "";
+    if (/^(https?|mailto):/i.test(href)) {
+      openUrl(href).catch((err) => fireToast(`Failed: ${err}`));
+    }
   });
 });
 
@@ -686,6 +700,8 @@ async function onMenuAction(key: string) {
         </div>
       </div>
     </div>
+
+    <UpdateToast />
   </div>
 </template>
 

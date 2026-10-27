@@ -6,6 +6,7 @@ import { SORTS, sortDef } from "../lib/sort";
 import { colorHex } from "../lib/colors";
 import type { CleanAction } from "./TopBar.vue";
 import { useTheme } from "../composables/useTheme";
+import { useAppVersion } from "../composables/useAppVersion";
 import RetainedIcon from "./RetainedIcon.vue";
 
 const props = defineProps<{
@@ -42,6 +43,7 @@ const emit = defineEmits<{
 }>();
 
 const { toggleTheme } = useTheme();
+const { version } = useAppVersion();
 
 const GROUPS: { key: Grouping; label: string }[] = [
   { key: "none", label: "None" },
@@ -325,7 +327,7 @@ function pickSort(key: SortKey) {
     </div>
 
     <div class="footer">
-      <span class="ver">v0.1 · local</span>
+      <span class="ver">{{ version ? `v${version} · local` : "local" }}</span>
       <button class="icon-btn" title="Toggle theme" @click="toggleTheme">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
           <path
