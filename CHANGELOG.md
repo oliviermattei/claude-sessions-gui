@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-27
+
 ### Added
 
 - **Profils** : l'app gère plusieurs configurations Claude Code (un dossier
@@ -23,7 +25,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Reprendre une session d'un autre profil lance `claude` avec son
   `CLAUDE_CONFIG_DIR` ; les commandes copiées sont préfixées (modifiable par
   profil) et les modèles de lanceur acceptent `{configDir}`.
-
 - **Mises à jour automatiques** : l'app vérifie les GitHub Releases au démarrage
   puis toutes les 6 h, et propose « Restart to update » quand une nouvelle
   version est publiée. Le paquet est vérifié par signature avant installation.
@@ -132,7 +133,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-platform release workflow producing installers for Windows, macOS
   (arm64 + x64) and Linux (x86_64 + arm64).
 
-[Unreleased]: https://github.com/oliviermattei/claude-sessions-gui/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/oliviermattei/claude-sessions-gui/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/oliviermattei/claude-sessions-gui/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/oliviermattei/claude-sessions-gui/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/oliviermattei/claude-sessions-gui/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/oliviermattei/claude-sessions-gui/compare/v0.2.0...v0.2.1

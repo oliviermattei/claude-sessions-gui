@@ -1,7 +1,7 @@
 {
   "name": "claude-sessions",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.4.0",
   "type": "module",
   "description": "A lightweight local desktop app to browse, search and relaunch your Claude Code sessions. Built with Tauri 2 + Vue 3.",
   "license": "MIT",
