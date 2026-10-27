@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, nextTick } from "vue";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
-import type { Grouping, SortKey, Session } from "./types";
+import type { Grouping, MoveOutcome, SortKey, Session } from "./types";
 import { useSessions } from "./composables/useSessions";
-import { useSettings } from "./composables/useSettings";
+import { useSettings, resumeCommand } from "./composables/useSettings";
+import { useProfiles } from "./composables/useProfiles";
 import { sortDef } from "./lib/sort";
 import { dateBucket, DATE_BUCKET_ORDER } from "./lib/format";
 import TitleBar from "./components/TitleBar.vue";
@@ -28,6 +29,8 @@ const { sessions, loading, error, reload } = useSessions();
 const { resume, launchers, defaultLauncher } = useSettings();
 const { layout } = useTheme();
 const { policy, policyLabel, setRetained, restore } = useRetention();
+const { visibleProfiles, activeProfileId, setActive: setActiveProfile, byId: profileById } =
+  useProfiles();
 const {
   transcript,
   loading: transcriptLoading,
@@ -109,12 +112,41 @@ async function fitWindow() {
 watch([layout, selectedSession, settingsOpen], fitWindow, { immediate: true });
 
 const toast = ref<string | null>(null);
+const toastAction = ref<{ label: string; run: () => void } | null>(null);
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
-function fireToast(msg: string) {
+function fireToast(msg: string, action?: { label: string; run: () => void }) {
   toast.value = msg;
+  toastAction.value = action ?? null;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (toast.value = null), 2400);
+  // Leave time to reach the button when there is one.
+  toastTimer = setTimeout(
+    () => {
+      toast.value = null;
+      toastAction.value = null;
+    },
+    action ? 6000 : 2400,
+  );
 }
+function onToastAction() {
+  const a = toastAction.value;
+  toast.value = null;
+  toastAction.value = null;
+  a?.run();
+}
+
+// Switching Profile shows another set of sessions and projects altogether.
+watch(activeProfileId, () => {
+  projectFilter.value = null;
+  selectedId.value = null;
+});
+// A session to select once the new Profile's list is in (the "Open" toast action).
+let selectAfterSwitch: string | null = null;
+watch(sessions, (list) => {
+  if (selectAfterSwitch && list.some((s) => s.id === selectAfterSwitch)) {
+    selectedId.value = selectAfterSwitch;
+  }
+  selectAfterSwitch = null;
+});
 
 // --- derived data ---------------------------------------------------------
 
@@ -218,7 +250,7 @@ const emptyMsg = computed(() =>
 async function onResume(s: Session, launcher?: (typeof launchers.value)[number]) {
   selectedId.value = s.id;
   try {
-    // The CLI can only resume what sits in ~/.claude/projects, so an archived
+    // The CLI can only resume what sits in its Profile's projects, so an archived
     // session is put back first — resuming it is exactly why it was kept.
     if (s.archived) {
       await restore(s);
@@ -287,6 +319,14 @@ const moveTargets = computed(() => {
   return projects.value.filter((p) => p.cwd !== s.project);
 });
 
+// Profiles a session can move to: every other one on show. As for projects, an
+// archived session has to be restored first.
+const profileTargets = computed(() => {
+  const s = menu.value?.session;
+  if (!s || s.archived) return [];
+  return visibleProfiles.value.filter((p) => p.id !== s.profile);
+});
+
 const menuItems = computed<MenuItem[]>(() => {
   const items: MenuItem[] = [
     { type: "item", key: "open", label: "Open transcript" },
@@ -332,6 +372,17 @@ const menuItems = computed<MenuItem[]>(() => {
       })),
     });
   }
+  if (profileTargets.value.length) {
+    items.push({
+      label: "Move to profile",
+      children: profileTargets.value.map((p) => ({
+        type: "item" as const,
+        key: `move-profile:${p.id}`,
+        label: p.name,
+        dot: colorHex(p.color) ?? undefined,
+      })),
+    });
+  }
   items.push({ type: "item", key: "reveal", label: "Reveal in Finder" });
 
   // Retention: opt a session out of Claude Code's automatic cleanup, and offer
@@ -365,6 +416,7 @@ const menuItems = computed<MenuItem[]>(() => {
 });
 
 const confirmDelete = ref<Session | null>(null);
+const dedupeConfirm = ref<{ session: Session; target: string } | null>(null);
 const cleanConfirm = ref<{ paths: string[]; title: string; body: string } | null>(null);
 const renameTarget = ref<Session | null>(null);
 const renameValue = ref("");
@@ -396,7 +448,7 @@ async function doDelete() {
   confirmDelete.value = null;
   if (!s) return;
   try {
-    await invoke("delete_session", { path: s.path });
+    await invoke("delete_session", { profile: s.profile, path: s.path });
     if (selectedId.value === s.id) selectedId.value = null;
     await reload();
     fireToast("Session moved to Trash");
@@ -407,7 +459,9 @@ async function doDelete() {
 
 async function onClean(_action: CleanAction) {
   try {
-    const paths = await invoke<string[]>("find_empty_sessions");
+    const paths = await invoke<string[]>("find_empty_sessions", {
+      profile: activeProfileId.value,
+    });
     if (!paths.length) {
       fireToast("No empty sessions to clean");
       return;
@@ -428,7 +482,10 @@ async function doClean() {
   cleanConfirm.value = null;
   if (!c) return;
   try {
-    const n = await invoke<number>("trash_sessions", { paths: c.paths });
+    const n = await invoke<number>("trash_sessions", {
+      profile: activeProfileId.value,
+      paths: c.paths,
+    });
     const gone = new Set(c.paths);
     if (selectedSession.value && gone.has(selectedSession.value.path)) selectedId.value = null;
     await reload();
@@ -436,6 +493,51 @@ async function doClean() {
   } catch (e) {
     fireToast(`Failed: ${e}`);
   }
+}
+
+/** Move a session to the same project in another Profile. */
+async function moveToProfile(s: Session, target: string, dedupe = false) {
+  const p = profileById(target);
+  if (!p) return;
+  try {
+    const out = await invoke<MoveOutcome>("move_session", {
+      profile: s.profile,
+      path: s.path,
+      targetProfile: target,
+      targetDir: null,
+      targetCwd: null,
+      dedupe,
+    });
+    if (out.status === "duplicate") {
+      dedupeConfirm.value = { session: s, target };
+      return;
+    }
+    if (selectedId.value === s.id) selectedId.value = null;
+    await reload();
+    fireToast(`Moved to ${p.name}${leftovers(out)}`, {
+      label: "Open",
+      run: () => {
+        selectAfterSwitch = s.id;
+        setActiveProfile(target);
+      },
+    });
+  } catch (e) {
+    fireToast(`Failed: ${e}`);
+  }
+}
+
+async function doDedupe() {
+  const d = dedupeConfirm.value;
+  dedupeConfirm.value = null;
+  if (d) await moveToProfile(d.session, d.target, true);
+}
+
+/** Toast suffix when the source could not be fully cleaned up. */
+function leftovers(out: MoveOutcome): string {
+  if (out.status !== "moved" || !out.warnings.length) return "";
+  console.warn("move leftovers", out.warnings);
+  const n = out.warnings.length;
+  return ` · ${n} leftover${n > 1 ? "s" : ""} not removed`;
 }
 
 async function onMenuAction(key: string) {
@@ -461,17 +563,24 @@ async function onMenuAction(key: string) {
     const target = projects.value.find((p) => p.cwd === cwd);
     if (!target) return;
     try {
-      await invoke<string>("move_session", {
+      const out = await invoke<MoveOutcome>("move_session", {
+        profile: s.profile,
         path: s.path,
+        targetProfile: s.profile,
         targetDir: target.dir,
         targetCwd: target.cwd,
+        dedupe: false,
       });
       if (selectedId.value === s.id) selectedId.value = null;
       await reload();
-      fireToast(`Moved to ${target.name}`);
+      fireToast(`Moved to ${target.name}${leftovers(out)}`);
     } catch (e) {
       fireToast(`Failed: ${e}`);
     }
+    return;
+  }
+  if (key.startsWith("move-profile:")) {
+    await moveToProfile(s, key.slice("move-profile:".length));
     return;
   }
   if (key.startsWith("color:")) {
@@ -504,7 +613,7 @@ async function onMenuAction(key: string) {
     try {
       await restore(s);
       await reload();
-      fireToast("Restored to ~/.claude/projects");
+      fireToast("Restored to projects");
     } catch (e) {
       fireToast(`Failed: ${e}`);
     }
@@ -521,7 +630,7 @@ async function onMenuAction(key: string) {
   }
   try {
     if (key === "copy-cmd") {
-      await navigator.clipboard.writeText(`claude --resume ${s.id}`);
+      await navigator.clipboard.writeText(resumeCommand(s));
       fireToast("Copied resume command");
     } else if (key === "copy-id") {
       await navigator.clipboard.writeText(s.id);
@@ -627,7 +736,7 @@ async function onMenuAction(key: string) {
         </template>
       </div>
 
-        <Toast :message="toast" />
+        <Toast :message="toast" :action="toastAction?.label" @action="onToastAction" />
       </main>
 
       <div v-if="selectedSession" class="viz-pane">
@@ -679,6 +788,23 @@ async function onMenuAction(key: string) {
         <div class="confirm-actions">
           <button class="btn" @click="cleanConfirm = null">Cancel</button>
           <button class="btn btn-danger" @click="doClean">Move to Trash</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="dedupeConfirm" class="confirm-overlay" @click="dedupeConfirm = null">
+      <div class="confirm" @click.stop>
+        <div class="confirm-title">
+          Already in {{ profileById(dedupeConfirm.target)?.name }}
+        </div>
+        <p class="confirm-body">
+          “{{ dedupeConfirm.session.title }}” already exists, identical, in
+          {{ profileById(dedupeConfirm.target)?.name }}. Remove this copy and its files
+          from the current profile?
+        </p>
+        <div class="confirm-actions">
+          <button class="btn" @click="dedupeConfirm = null">Cancel</button>
+          <button class="btn btn-danger" @click="doDedupe">Remove this copy</button>
         </div>
       </div>
     </div>

@@ -10,10 +10,34 @@ export interface Session {
   created: number; // epoch ms
   modified: number; // epoch ms — last real activity, never the keep-alive stamp
   path: string;
+  profile: string; // id of the Profile it belongs to
   color?: string | null; // Claude "agent-color" (red/blue/…) or null
   retained: boolean; // exempted from Claude Code's automatic cleanup
   archived: boolean; // cleaned up already; `path` points into our vault copy
 }
+
+/** One Claude Code config dir (`CLAUDE_CONFIG_DIR`). Mirrors the Rust `Profile`. */
+export interface Profile {
+  id: string;
+  name: string;
+  path: string;
+  color?: string | null; // one of SESSION_COLORS, or null
+  hidden: boolean;
+  /** Added by hand (removable) rather than detected. */
+  manual: boolean;
+  /** `~/.claude`, what Claude uses when CLAUDE_CONFIG_DIR is unset. */
+  isDefault: boolean;
+  /** False when its folder no longer exists. */
+  exists: boolean;
+  /** Overrides the shell prefix of a copied resume command; `{configDir}` placeholder. */
+  resumePrefix?: string | null;
+}
+
+/** Result of `move_session`. */
+export type MoveOutcome =
+  | { status: "moved"; path: string; warnings: string[] }
+  /** The target Profile already holds this exact session. */
+  | { status: "duplicate" };
 
 /** Effective `cleanupPeriodDays` and where retained copies are kept. */
 export interface RetentionPolicy {

@@ -15,15 +15,18 @@ sessions. Built with **Tauri 2** (Rust backend) + **Vue 3 / Vite** (TypeScript).
 
 <p align="center"><em>Free &amp; open source. If it saves you time, you can <a href="https://buymeacoffee.com/oliviermattei">buy me a coffee</a> ☕ — every little bit helps and keeps the project going.</em></p>
 
-The app reads your transcripts under `~/.claude/projects/**/*.jsonl`. Browsing,
+The app reads your transcripts under `<profile>/projects/**/*.jsonl`, for every
+Claude config folder you use (`~/.claude`, `~/.claude-perso`…, see
+[Profiles](#profiles)). Browsing,
 search and sorting are strictly read-only. Only the explicit session actions
 write, and never silently:
 
 - **Rename** and **set color** _append_ Claude-native rows (`custom-title`,
   `agent-name`, `agent-color`) — the same rows Claude Code itself writes. Nothing
   in the existing transcript is rewritten or removed.
-- **Move** rewrites the working directory into a copy of the transcript, then
-  removes the original.
+- **Move** (to another project, or to another profile) copies the session and
+  everything it owns, rewriting the paths that point into what moved, then
+  removes the original — all or nothing.
 - **Delete** sends the `.jsonl` (and its sidecar folder) to the OS trash, so it
   stays recoverable.
 
@@ -40,6 +43,8 @@ didn't act on.
   _(The prototype's "Latest Summary" was dropped — Claude transcripts carry no
   summary timestamp to sort on.)_
 - **Dark / light** themes with a configurable accent color.
+- **Profiles**: one per Claude config folder, switched from the sidebar; move a
+  session from one to another (see below).
 - **Configurable Resume launchers** (see below).
 - **Automatic updates**: installed apps check GitHub Releases at startup and
   offer to restart on a new version (signed and verified). The Windows
@@ -67,10 +72,18 @@ pnpm tauri build
 ## How "Resume" works
 
 Resume launchers are fully editable in **Settings** (gear icon, bottom-left).
-Each launcher is a command template with two placeholders:
+Each launcher is a command template with these placeholders:
 
 - `{cwd}` — the session's working directory
 - `{id}` — the session UUID
+- `{configDir}` — the session's profile folder (its `CLAUDE_CONFIG_DIR`)
+
+A session of a non-default profile is resumed with `CLAUDE_CONFIG_DIR` set:
+**run** launchers get it in their environment, and copied commands are prefixed
+(`$env:CLAUDE_CONFIG_DIR='…'; ` in PowerShell by default, editable per profile).
+Windows Terminal may open the new tab with the environment of an already open
+window instead: if so, put `{configDir}` in the template, e.g.
+`wt.exe -d "{cwd}" cmd /k "set CLAUDE_CONFIG_DIR={configDir}&& claude --resume {id}"`.
 
 Presets:
 
@@ -103,13 +116,33 @@ So the Warp preset opens a tab in the session folder **and** copies
 `claude --resume <id>` to your clipboard — just paste and press Enter. Tweak the
 template once Warp ships inline-command support.
 
+## Profiles
+
+A profile is one Claude Code config folder — what `CLAUDE_CONFIG_DIR` points to,
+`~/.claude` when it is unset. `~/.claude` and every `~/.claude-*` folder holding
+a `projects/` folder are detected; **Settings → Profiles** renames, colours or
+hides them, and adds any other folder. With two profiles or more, a switcher at
+the bottom of the sidebar picks the one the window shows.
+
+**Move to profile** (session context menu) moves a session to the same project in
+another profile, with everything it owns there: transcript and sidecar folder
+(in every project folder it has one), `/rewind` checkpoints (`file-history`),
+`session-env`, its plan, its prompt-history rows and the pastes only they recall.
+Paths pointing into what moved are rewritten
+([ADR 0001](docs/adr/0001-move-rewrites-only-paths-to-moved-files.md)); the
+source is deleted only once the copy is complete. A session open in a running
+`claude` process is never moved.
+
 ## Project structure
 
 ```
 src-tauri/src/lib.rs   # list_sessions + run_command commands
+src-tauri/src/profiles.rs  # Claude config folders (detection, settings)
+src-tauri/src/mover.rs     # moving a session between projects / profiles
+src-tauri/src/retention.rs # keep sessions beyond Claude Code's cleanup
 src/App.vue            # main list view orchestration
 src/components/        # Sidebar, TopBar, SessionRow, EmptyState, Toast, SettingsModal
-src/composables/       # useSessions, useSettings, useTheme
+src/composables/       # useSessions, useProfiles, useSettings, useTheme
 src/lib/               # sort defs + date/highlight helpers
 src/styles/theme.css   # design tokens (dark/light)
 ```

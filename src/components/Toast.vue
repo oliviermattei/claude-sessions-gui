@@ -1,5 +1,10 @@
 <script setup lang="ts">
-defineProps<{ message: string | null }>();
+defineProps<{
+  message: string | null;
+  /** Label of an optional button, e.g. "Open". */
+  action?: string | null;
+}>();
+defineEmits<{ action: [] }>();
 </script>
 
 <template>
@@ -7,6 +12,7 @@ defineProps<{ message: string | null }>();
     <div v-if="message" class="toast">
       <span class="pulse"></span>
       <span class="text">{{ message }}</span>
+      <button v-if="action" class="action" @click="$emit('action')">{{ action }}</button>
     </div>
   </Transition>
 </template>
@@ -43,6 +49,20 @@ defineProps<{ message: string | null }>();
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.action {
+  flex: none;
+  border: 1px solid var(--bd2);
+  background: transparent;
+  color: var(--acc);
+  border-radius: 7px;
+  padding: 3px 9px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.action:hover {
+  background: var(--hover);
 }
 .toast-enter-active,
 .toast-leave-active {

@@ -1,12 +1,17 @@
 // Claude Sessions — Tauri backend
 //
 // Two responsibilities:
-//   1. `list_sessions`  — scan ~/.claude/projects/**/*.jsonl and extract session metadata
+//   1. `list_sessions`  — scan <profile>/projects/**/*.jsonl and extract session metadata
 //   2. `run_command`    — spawn a configurable, detached shell command (the "Resume" action)
+//
+// Every command touching transcripts names the Profile (one Claude config dir,
+// see `profiles`) it works in.
 //
 // Reads are non-destructive; the only writes are the explicit user actions
 // (rename, color, move, delete) and the retention keep-alive in `retention`.
 
+mod mover;
+mod profiles;
 mod retention;
 
 use serde::Serialize;
@@ -29,10 +34,11 @@ pub(crate) struct Session {
     pub created: i64,          // first message timestamp (fallback: file mtime)
     pub modified: i64,         // last real activity (retained sessions: the true mtime)
     pub path: String,          // absolute path to the .jsonl file
+    pub profile: String,       // id of its Profile (set by `list_sessions`)
     pub color: Option<String>, // Claude "agent-color" (red/blue/…) or None
     // Both set by `retention::annotate`, never by the parser itself.
     pub retained: bool, // exempted from Claude Code's automatic cleanup
-    pub archived: bool, // gone from ~/.claude/projects; `path` points into the vault
+    pub archived: bool, // gone from its Profile's projects; `path` points into the vault
 }
 
 /// Parse an ISO-8601 timestamp (e.g. "2026-06-22T14:45:56.689Z") to epoch millis.
@@ -219,6 +225,7 @@ pub(crate) fn parse_session(path: &Path) -> Option<Session> {
         created: first_ts.unwrap_or(modified),
         modified,
         path: path.to_string_lossy().to_string(),
+        profile: String::new(),
         color: agent_color,
         retained: false,
         archived: false,
@@ -446,54 +453,59 @@ fn get_session_messages(path: String) -> Result<Transcript, String> {
     })
 }
 
-pub(crate) fn projects_dir() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".claude").join("projects"))
-}
-
-/// Scan every project folder for .jsonl transcripts and return parsed sessions.
+/// Scan every project folder of a Profile for .jsonl transcripts and return
+/// parsed sessions.
 #[tauri::command(async)]
-fn list_sessions() -> Result<Vec<Session>, String> {
-    let root = projects_dir().ok_or_else(|| "Could not resolve home directory".to_string())?;
-    if !root.exists() {
-        return Ok(vec![]);
-    }
-
+fn list_sessions(profile: String) -> Result<Vec<Session>, String> {
+    let p = profiles::resolve(&profile)?;
+    let root = p.projects_dir();
     let mut out = Vec::new();
-    let entries = fs::read_dir(&root).map_err(|e| e.to_string())?;
-    for entry in entries.flatten() {
-        let dir = entry.path();
-        if !dir.is_dir() {
-            continue;
-        }
-        let files = match fs::read_dir(&dir) {
-            Ok(f) => f,
-            Err(_) => continue,
-        };
-        for f in files.flatten() {
-            let p = f.path();
-            if p.extension().and_then(|e| e.to_str()) == Some("jsonl") {
-                if let Some(session) = parse_session(&p) {
-                    out.push(session);
+    if root.exists() {
+        let entries = fs::read_dir(&root).map_err(|e| e.to_string())?;
+        for entry in entries.flatten() {
+            let dir = entry.path();
+            if !dir.is_dir() {
+                continue;
+            }
+            let files = match fs::read_dir(&dir) {
+                Ok(f) => f,
+                Err(_) => continue,
+            };
+            for f in files.flatten() {
+                let p = f.path();
+                if p.extension().and_then(|e| e.to_str()) == Some("jsonl") {
+                    if let Some(mut session) = parse_session(&p) {
+                        session.profile = profile.clone();
+                        out.push(session);
+                    }
                 }
             }
         }
     }
     // Flag retained sessions and add back any that now live only in the vault.
-    retention::annotate(&mut out);
+    retention::annotate(&mut out, &profile);
     Ok(out)
 }
 
 /// Spawn a detached shell command (the "Resume" action). The frontend builds the
 /// full command line from an editable template, so any launcher works without
 /// recompiling: Warp, Windows Terminal, PowerShell, custom, etc.
+///
+/// `config_dir` is the session's Profile directory, passed down as
+/// `CLAUDE_CONFIG_DIR` so `claude --resume` finds it; None (the Default Profile)
+/// clears the variable, in case this app itself was started with one.
 #[tauri::command(async)]
-fn run_command(command: String, cwd: Option<String>) -> Result<(), String> {
+fn run_command(
+    command: String,
+    cwd: Option<String>,
+    config_dir: Option<String>,
+) -> Result<(), String> {
     if command.trim().is_empty() {
         return Err("Empty command".to_string());
     }
 
     #[cfg(target_os = "windows")]
-    {
+    let mut cmd = {
         use std::os::windows::process::CommandExt;
         // CREATE_NO_WINDOW: don't flash a console for the transient `cmd` host.
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -501,109 +513,24 @@ fn run_command(command: String, cwd: Option<String>) -> Result<(), String> {
         cmd.arg("/C")
             .raw_arg(&command)
             .creation_flags(CREATE_NO_WINDOW);
-        if let Some(dir) = cwd.as_deref().filter(|d| !d.is_empty()) {
-            cmd.current_dir(dir);
-        }
-        cmd.spawn().map(|_| ()).map_err(|e| e.to_string())
-    }
+        cmd
+    };
 
     #[cfg(not(target_os = "windows"))]
-    {
+    let mut cmd = {
         let mut cmd = std::process::Command::new("sh");
         cmd.arg("-c").arg(&command);
-        if let Some(dir) = cwd.as_deref().filter(|d| !d.is_empty()) {
-            cmd.current_dir(dir);
-        }
-        cmd.spawn().map(|_| ()).map_err(|e| e.to_string())
-    }
-}
+        cmd
+    };
 
-/// Move a session .jsonl (and its `<id>/` sidecar dir, if any) into another
-/// project's folder, rewriting the `cwd` field on every row so that
-/// `claude --resume <id>` resolves the session in the new project.
-///
-/// `target_dir` is the destination project folder (parent of its sessions);
-/// `target_cwd` is the absolute working directory written into the transcript.
-/// Returns the new absolute .jsonl path.
-#[tauri::command(async)]
-fn move_session(path: String, target_dir: String, target_cwd: String) -> Result<String, String> {
-    let src = PathBuf::from(&path);
-    if !src.exists() {
-        return Err("Session file not found".to_string());
+    if let Some(dir) = cwd.as_deref().filter(|d| !d.is_empty()) {
+        cmd.current_dir(dir);
     }
-    let dst_dir = PathBuf::from(&target_dir);
-    if !dst_dir.is_dir() {
-        return Err("Target project folder not found".to_string());
-    }
-    let file_name = src
-        .file_name()
-        .ok_or_else(|| "Invalid session path".to_string())?;
-    let dst = dst_dir.join(file_name);
-    if dst == src {
-        return Ok(path); // already there
-    }
-    if dst.exists() {
-        return Err("A session with this id already exists in the target project".to_string());
-    }
-
-    // Rewrite cwd on every row that carries one, then write the new file.
-    let content = fs::read_to_string(&src).map_err(|e| e.to_string())?;
-    let mut out = String::with_capacity(content.len());
-    for line in content.lines() {
-        if line.trim().is_empty() {
-            out.push('\n');
-            continue;
-        }
-        match serde_json::from_str::<serde_json::Value>(line) {
-            Ok(mut v) => {
-                if v.get("cwd").is_some() {
-                    if let Some(obj) = v.as_object_mut() {
-                        obj.insert(
-                            "cwd".to_string(),
-                            serde_json::Value::String(target_cwd.clone()),
-                        );
-                    }
-                }
-                out.push_str(&serde_json::to_string(&v).map_err(|e| e.to_string())?);
-                out.push('\n');
-            }
-            // Preserve non-JSON lines verbatim rather than dropping data.
-            Err(_) => {
-                out.push_str(line);
-                out.push('\n');
-            }
-        }
-    }
-    fs::write(&dst, out).map_err(|e| e.to_string())?;
-
-    // Move the `<id>/` sidecar directory (subagents, etc.) alongside it.
-    if let (Some(parent), Some(stem)) = (src.parent(), src.file_stem()) {
-        let side = parent.join(stem);
-        if side.is_dir() {
-            let dst_side = dst_dir.join(stem);
-            if !dst_side.exists() {
-                // Rename only works within one filesystem; across devices fall
-                // back to copy + delete. If even that fails, undo the move rather
-                // than leave the subagents orphaned in the old project.
-                if fs::rename(&side, &dst_side).is_err() {
-                    if let Err(e) = retention::copy_dir(&side, &dst_side) {
-                        let _ = fs::remove_dir_all(&dst_side);
-                        let _ = fs::remove_file(&dst);
-                        return Err(format!("Could not move the session's subagents: {e}"));
-                    }
-                    let _ = fs::remove_dir_all(&side);
-                }
-            }
-        }
-    }
-
-    fs::remove_file(&src).map_err(|e| e.to_string())?;
-
-    // A retained session must keep being retained at its new path, otherwise the
-    // keep-alive would tick on a path that no longer exists.
-    retention::relocate(&src, &dst, &target_cwd);
-
-    Ok(dst.to_string_lossy().to_string())
+    match config_dir.as_deref().filter(|d| !d.is_empty()) {
+        Some(dir) => cmd.env("CLAUDE_CONFIG_DIR", dir),
+        None => cmd.env_remove("CLAUDE_CONFIG_DIR"),
+    };
+    cmd.spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
 /// True if a transcript has zero real user/assistant turns (a stray/empty file
@@ -637,11 +564,11 @@ fn is_empty_session(path: &Path) -> bool {
     true
 }
 
-/// Scan every project folder for transcripts with no real turns. Returns their
+/// Scan every project folder of a Profile for transcripts with no real turns. Returns their
 /// absolute paths (candidates for "Clean empty sessions").
 #[tauri::command(async)]
-fn find_empty_sessions() -> Result<Vec<String>, String> {
-    let root = projects_dir().ok_or_else(|| "Could not resolve home directory".to_string())?;
+fn find_empty_sessions(profile: String) -> Result<Vec<String>, String> {
+    let root = profiles::resolve(&profile)?.projects_dir();
     if !root.exists() {
         return Ok(vec![]);
     }
@@ -667,7 +594,7 @@ fn find_empty_sessions() -> Result<Vec<String>, String> {
 /// Send many sessions to the trash in one call (each with its `<id>/` sidecar).
 /// Returns how many .jsonl files were trashed.
 #[tauri::command(async)]
-fn trash_sessions(paths: Vec<String>) -> Result<usize, String> {
+fn trash_sessions(profile: String, paths: Vec<String>) -> Result<usize, String> {
     let mut n = 0;
     for path in paths {
         let p = PathBuf::from(&path);
@@ -681,7 +608,7 @@ fn trash_sessions(paths: Vec<String>) -> Result<usize, String> {
             }
         }
         if trash::delete(&p).is_ok() {
-            retention::forget(&p);
+            retention::forget(&profile, &p);
             n += 1;
         }
     }
@@ -691,7 +618,7 @@ fn trash_sessions(paths: Vec<String>) -> Result<usize, String> {
 /// Send a session .jsonl (and its `<id>/` sidecar dir, if any) to the OS trash.
 /// Recoverable — nothing is permanently deleted.
 #[tauri::command(async)]
-fn delete_session(path: String) -> Result<(), String> {
+fn delete_session(profile: String, path: String) -> Result<(), String> {
     let p = PathBuf::from(&path);
     if !p.exists() {
         return Err("Session file not found".to_string());
@@ -705,7 +632,7 @@ fn delete_session(path: String) -> Result<(), String> {
     trash::delete(&p).map_err(|e| e.to_string())?;
     // Deleting on purpose beats retention: drop the registry entry and the vault
     // copy so the session can't reappear as an archived ghost on the next scan.
-    retention::forget(&p);
+    retention::forget(&profile, &p);
     Ok(())
 }
 
@@ -813,7 +740,7 @@ pub fn run() {
             list_sessions,
             get_session_messages,
             run_command,
-            move_session,
+            mover::move_session,
             delete_session,
             set_session_color,
             set_session_title,
@@ -822,7 +749,11 @@ pub fn run() {
             retention::retention_policy,
             retention::set_session_retained,
             retention::refresh_retained,
-            retention::restore_retained
+            retention::restore_retained,
+            profiles::list_profiles,
+            profiles::update_profile,
+            profiles::add_profile,
+            profiles::remove_profile
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

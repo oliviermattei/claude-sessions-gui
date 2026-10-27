@@ -9,12 +9,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Profils** : l'app gère plusieurs configurations Claude Code (un dossier
+  `CLAUDE_CONFIG_DIR` chacune). `~/.claude` et les dossiers `~/.claude-*` sont
+  détectés ; Réglages → Profiles permet de les renommer, colorer, masquer, ou
+  d'ajouter un autre dossier. Un sélecteur en bas de la sidebar choisit le
+  profil affiché (dès qu'il y en a deux).
+- **Déplacer vers un profil** : une session passe d'un profil à l'autre avec
+  tout ce qu'elle possède (transcript et sidecar dans chaque dossier projet,
+  checkpoints `/rewind`, `session-env`, plan, lignes de `history.jsonl` et
+  pastes associés). Les chemins vers ce qui bouge sont réécrits, la source n'est
+  supprimée qu'une fois la copie complète, et une session identique déjà
+  présente dans la cible peut être dédoublonnée.
+- Reprendre une session d'un autre profil lance `claude` avec son
+  `CLAUDE_CONFIG_DIR` ; les commandes copiées sont préfixées (modifiable par
+  profil) et les modèles de lanceur acceptent `{configDir}`.
+
 - **Mises à jour automatiques** : l'app vérifie les GitHub Releases au démarrage
   puis toutes les 6 h, et propose « Restart to update » quand une nouvelle
   version est publiée. Le paquet est vérifié par signature avant installation.
   L'exe portable Windows ne se met pas à jour seul. Les installations en 0.3.0
   et avant doivent installer à la main la première version qui embarque
   l'updater.
+
+### Changed
+
+- La rétention est propre à chaque profil (période de nettoyage lue dans son
+  dossier, vault rangé par profil) ; le registre existant est migré vers le
+  profil par défaut au premier lancement. Le rafraîchissement couvre tous les
+  profils.
+- « Déplacer vers un projet » réécrit aussi les chemins internes du transcript
+  (résultats d'outils, sous-agents) et l'historique des prompts, et refuse une
+  session ouverte dans un processus `claude` en cours.
 
 ### Fixed
 

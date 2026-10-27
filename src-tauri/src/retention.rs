@@ -17,9 +17,12 @@
 //      A vault copy can be restored back into ~/.claude/projects on demand.
 //
 // The registry (which sessions are retained, plus their true last-activity
-// mtime) lives next to the vault in the OS app-data dir.
+// mtime) lives next to the vault in the OS app-data dir. Both are keyed by
+// Profile: every Profile has its own cleanup period and its own transcripts,
+// and the same session id can exist in two of them.
 
-use crate::{mtime_millis, parse_session, projects_dir, Session};
+use crate::profiles::{self, Profile, DEFAULT_ID};
+use crate::{mtime_millis, parse_session, Session};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
@@ -50,9 +53,11 @@ fn registry_path() -> Option<PathBuf> {
 #[serde(rename_all = "camelCase", default)]
 pub(crate) struct Entry {
     pub id: String,
-    /// Name of the `~/.claude/projects/<…>` folder the session belongs to.
+    /// Id of the Profile the session belongs to.
+    pub profile: String,
+    /// Name of the `<profile>/projects/<…>` folder the session belongs to.
     pub project_dir: String,
-    /// Last known live path under ~/.claude/projects (may no longer exist).
+    /// Last known live path under `<profile>/projects` (may no longer exist).
     pub path: String,
     /// Session cwd, kept so a restore can be described without reading the file.
     pub cwd: String,
@@ -69,7 +74,14 @@ pub(crate) struct Entry {
 #[serde(rename_all = "camelCase", default)]
 struct Registry {
     version: u32,
+    /// Keyed by `key(profile, id)`.
     entries: BTreeMap<String, Entry>,
+}
+
+const REGISTRY_VERSION: u32 = 2;
+
+fn key(profile: &str, id: &str) -> String {
+    format!("{profile}/{id}")
 }
 
 impl Registry {
@@ -78,14 +90,47 @@ impl Registry {
             return Registry::default();
         };
         // A missing or corrupt registry is not an error: nothing is retained yet.
-        fs::read_to_string(&p)
+        let mut reg = fs::read_to_string(&p)
             .ok()
             .and_then(|s| serde_json::from_str::<Registry>(&s).ok())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        if reg.version < REGISTRY_VERSION && !reg.entries.is_empty() {
+            reg.migrate_to_profiles();
+            let _ = reg.save();
+        }
+        reg
+    }
+
+    /// Version 1 knew only `~/.claude`: its entries, keyed by bare id, belong to
+    /// the Default Profile, and their vault copies move under its folder.
+    fn migrate_to_profiles(&mut self) {
+        let old = std::mem::take(&mut self.entries);
+        for (_, mut e) in old {
+            if e.profile.is_empty() {
+                e.profile = DEFAULT_ID.to_string();
+                if let (Some(vault), Some((nf, nside))) =
+                    (vault_dir(), vault_paths(&e.profile, &e.project_dir, &e.id))
+                {
+                    let root = vault.join(&e.project_dir);
+                    let (of, oside) = (root.join(format!("{}.jsonl", e.id)), root.join(&e.id));
+                    if let Some(parent) = nf.parent() {
+                        let _ = fs::create_dir_all(parent);
+                    }
+                    if of.is_file() {
+                        let _ = fs::rename(&of, &nf);
+                    }
+                    if oside.is_dir() {
+                        let _ = fs::rename(&oside, &nside);
+                    }
+                    let _ = fs::remove_dir(&root);
+                }
+            }
+            self.entries.insert(key(&e.profile, &e.id), e);
+        }
     }
 
     fn save(&mut self) -> Result<(), String> {
-        self.version = 1;
+        self.version = REGISTRY_VERSION;
         let p = registry_path().ok_or_else(|| "Could not resolve the app data dir".to_string())?;
         if let Some(parent) = p.parent() {
             fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -172,15 +217,15 @@ pub(crate) fn copy_dir(src: &Path, dst: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn vault_paths(project_dir: &str, id: &str) -> Option<(PathBuf, PathBuf)> {
-    let root = vault_dir()?.join(project_dir);
+fn vault_paths(profile: &str, project_dir: &str, id: &str) -> Option<(PathBuf, PathBuf)> {
+    let root = vault_dir()?.join(profile).join(project_dir);
     Some((root.join(format!("{id}.jsonl")), root.join(id)))
 }
 
 /// Mirror a transcript (and its sidecar) into the vault, overwriting any
 /// previous copy.
-fn archive(jsonl: &Path, project_dir: &str, id: &str) -> Result<(), String> {
-    let (dst, dst_side) = vault_paths(project_dir, id)
+fn archive(jsonl: &Path, profile: &str, project_dir: &str, id: &str) -> Result<(), String> {
+    let (dst, dst_side) = vault_paths(profile, project_dir, id)
         .ok_or_else(|| "Could not resolve the vault dir".to_string())?;
     if let Some(parent) = dst.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -193,18 +238,21 @@ fn archive(jsonl: &Path, project_dir: &str, id: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn drop_vault(project_dir: &str, id: &str) {
-    if let Some((f, side)) = vault_paths(project_dir, id) {
+fn drop_vault(profile: &str, project_dir: &str, id: &str) {
+    if let Some((f, side)) = vault_paths(profile, project_dir, id) {
         let _ = fs::remove_file(&f);
         let _ = fs::remove_dir_all(&side);
-        // Leave no empty project folder behind in the vault.
+        // Leave no empty project (or profile) folder behind in the vault.
         if let Some(parent) = f.parent() {
             let _ = fs::remove_dir(parent);
+            if let Some(profile_dir) = parent.parent() {
+                let _ = fs::remove_dir(profile_dir);
+            }
         }
     }
 }
 
-/// Folder name of the `~/.claude/projects/<…>` directory holding a transcript.
+/// Folder name of the `<profile>/projects/<…>` directory holding a transcript.
 fn project_dir_of(jsonl: &Path) -> String {
     jsonl
         .parent()
@@ -222,9 +270,9 @@ fn id_of(jsonl: &Path) -> String {
 
 // --- annotation (used by `list_sessions`) ----------------------------------
 
-/// Flag retained sessions, hide the keep-alive from the UI's "modified" value,
-/// and append sessions that now exist only in the vault.
-pub(crate) fn annotate(sessions: &mut Vec<Session>) {
+/// Flag retained sessions of `profile`, hide the keep-alive from the UI's
+/// "modified" value, and append its sessions that now exist only in the vault.
+pub(crate) fn annotate(sessions: &mut Vec<Session>, profile: &str) {
     let _guard = lock_registry();
     let mut reg = Registry::load();
     if reg.entries.is_empty() {
@@ -233,7 +281,7 @@ pub(crate) fn annotate(sessions: &mut Vec<Session>) {
     let mut dirty = false;
 
     for s in sessions.iter_mut() {
-        let Some(e) = reg.entries.get_mut(&s.id) else {
+        let Some(e) = reg.entries.get_mut(&key(profile, &s.id)) else {
             continue;
         };
         s.retained = true;
@@ -269,18 +317,19 @@ pub(crate) fn annotate(sessions: &mut Vec<Session>) {
     let orphans: Vec<Entry> = reg
         .entries
         .values()
-        .filter(|e| !live.contains(&e.id))
+        .filter(|e| e.profile == profile && !live.contains(&e.id))
         .cloned()
         .collect();
 
     for e in orphans {
-        let Some((vf, _)) = vault_paths(&e.project_dir, &e.id) else {
+        let Some((vf, _)) = vault_paths(&e.profile, &e.project_dir, &e.id) else {
             continue;
         };
         if !vf.is_file() {
             continue;
         }
         if let Some(mut s) = parse_session(&vf) {
+            s.profile = profile.to_string();
             s.retained = true;
             s.archived = true;
             if s.updated == s.modified {
@@ -328,11 +377,11 @@ fn managed_settings_path() -> PathBuf {
     return PathBuf::from("/etc/claude-code/managed-settings.json");
 }
 
-/// The retention window sessions are actually judged against. Precedence follows
-/// Claude Code's own: managed policy, then org remote settings, then the user's
-/// settings.json, else the 30-day default.
+/// The retention window a Profile's sessions are actually judged against.
+/// Precedence follows Claude Code's own: machine-wide managed policy, then the
+/// Profile's org remote settings, then its settings.json, else the 30-day default.
 #[tauri::command(async)]
-pub fn retention_policy() -> RetentionPolicy {
+pub fn retention_policy(profile: String) -> RetentionPolicy {
     let vault = vault_dir()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
@@ -344,16 +393,16 @@ pub fn retention_policy() -> RetentionPolicy {
             vault,
         };
     }
-    if let Some(home) = dirs::home_dir() {
-        let claude = home.join(".claude");
-        if let Some(days) = read_period(&claude.join("remote-settings.json")) {
+    if let Ok(p) = profiles::resolve(&profile) {
+        let root = p.root();
+        if let Some(days) = read_period(&root.join("remote-settings.json")) {
             return RetentionPolicy {
                 days,
                 managed: true,
                 vault,
             };
         }
-        if let Some(days) = read_period(&claude.join("settings.json")) {
+        if let Some(days) = read_period(&root.join("settings.json")) {
             return RetentionPolicy {
                 days,
                 managed: false,
@@ -373,7 +422,7 @@ pub fn retention_policy() -> RetentionPolicy {
 /// Releasing restores the transcript's true mtime, so the org's retention
 /// applies again exactly as if the session had never been retained.
 #[tauri::command(async)]
-pub fn set_session_retained(path: String, retained: bool) -> Result<(), String> {
+pub fn set_session_retained(profile: String, path: String, retained: bool) -> Result<(), String> {
     let p = PathBuf::from(&path);
     let id = id_of(&p);
     if id.is_empty() {
@@ -383,8 +432,8 @@ pub fn set_session_retained(path: String, retained: bool) -> Result<(), String> 
     let mut reg = Registry::load();
 
     if !retained {
-        if let Some(e) = reg.entries.remove(&id) {
-            drop_vault(&e.project_dir, &e.id);
+        if let Some(e) = reg.entries.remove(&key(&profile, &id)) {
+            drop_vault(&e.profile, &e.project_dir, &e.id);
             if p.is_file() && e.real_modified > 0 {
                 let _ = touch_tree(&p, millis_to_time(e.real_modified));
             }
@@ -400,13 +449,14 @@ pub fn set_session_retained(path: String, retained: bool) -> Result<(), String> 
     let real_modified = mtime_millis(&p);
     let cwd = parse_session(&p).map(|s| s.project).unwrap_or_default();
 
-    archive(&p, &project_dir, &id)?;
+    archive(&p, &profile, &project_dir, &id)?;
     let touched_to = touch_tree(&p, SystemTime::now())?;
 
     reg.entries.insert(
-        id.clone(),
+        key(&profile, &id),
         Entry {
             id,
+            profile,
             project_dir,
             path,
             cwd,
@@ -425,13 +475,13 @@ pub struct RefreshReport {
     pub refreshed: u32,
     /// Vault copies rewritten because the transcript had changed.
     pub archived: u32,
-    /// Retained sessions no longer in ~/.claude/projects (served from the vault).
+    /// Retained sessions no longer in their Profile's projects (served from the vault).
     pub missing: u32,
 }
 
-/// Keep-alive pass: run it on every app start, and periodically while it runs.
-/// Each retained transcript gets a fresh mtime and, when it changed since the
-/// last pass, a fresh vault copy.
+/// Keep-alive pass over every Profile: run it on every app start, and
+/// periodically while it runs. Each retained transcript gets a fresh mtime and,
+/// when it changed since the last pass, a fresh vault copy.
 #[tauri::command(async)]
 pub fn refresh_retained() -> Result<RefreshReport, String> {
     let _guard = lock_registry();
@@ -448,14 +498,14 @@ pub fn refresh_retained() -> Result<RefreshReport, String> {
     let now = SystemTime::now();
     let mut dead: Vec<String> = Vec::new();
 
-    for e in reg.entries.values_mut() {
+    for (k, e) in reg.entries.iter_mut() {
         let p = PathBuf::from(&e.path);
         if !p.is_file() {
             // Gone from the scanned tree. Keep the entry as long as the vault
             // still holds it; otherwise there is nothing left to point at.
-            match vault_paths(&e.project_dir, &e.id) {
+            match vault_paths(&e.profile, &e.project_dir, &e.id) {
                 Some((vf, _)) if vf.is_file() => report.missing += 1,
-                _ => dead.push(e.id.clone()),
+                _ => dead.push(k.clone()),
             }
             continue;
         }
@@ -465,11 +515,11 @@ pub fn refresh_retained() -> Result<RefreshReport, String> {
             e.real_modified = mtime;
         }
 
-        let vault_stale = match vault_paths(&e.project_dir, &e.id) {
+        let vault_stale = match vault_paths(&e.profile, &e.project_dir, &e.id) {
             Some((vf, _)) => !vf.is_file() || e.archived_modified != e.real_modified,
             None => false,
         };
-        if vault_stale && archive(&p, &e.project_dir, &e.id).is_ok() {
+        if vault_stale && archive(&p, &e.profile, &e.project_dir, &e.id).is_ok() {
             e.archived_modified = e.real_modified;
             report.archived += 1;
         }
@@ -480,32 +530,33 @@ pub fn refresh_retained() -> Result<RefreshReport, String> {
         }
     }
 
-    for id in dead {
-        reg.entries.remove(&id);
+    for k in dead {
+        reg.entries.remove(&k);
     }
     reg.save()?;
     Ok(report)
 }
 
-/// Copy a vault-only session back into ~/.claude/projects so the CLI can resume
-/// it again. Returns its new live path.
+/// Copy a vault-only session back into its Profile's projects so the CLI can
+/// resume it again. Returns its new live path.
 #[tauri::command(async)]
-pub fn restore_retained(id: String) -> Result<String, String> {
+pub fn restore_retained(profile: String, id: String) -> Result<String, String> {
+    let target: Profile = profiles::resolve(&profile)?;
     let _guard = lock_registry();
     let mut reg = Registry::load();
+    let k = key(&profile, &id);
     let e = reg
         .entries
-        .get(&id)
+        .get(&k)
         .cloned()
         .ok_or_else(|| "This session is not retained".to_string())?;
-    let (vf, vside) = vault_paths(&e.project_dir, &e.id)
+    let (vf, vside) = vault_paths(&e.profile, &e.project_dir, &e.id)
         .ok_or_else(|| "Could not resolve the vault dir".to_string())?;
     if !vf.is_file() {
         return Err("No archived copy to restore".to_string());
     }
 
-    let root = projects_dir().ok_or_else(|| "Could not resolve home directory".to_string())?;
-    let dir = root.join(&e.project_dir);
+    let dir = target.projects_dir().join(&e.project_dir);
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let dst = dir.join(format!("{}.jsonl", e.id));
     if dst.exists() {
@@ -517,7 +568,7 @@ pub fn restore_retained(id: String) -> Result<String, String> {
         copy_dir(&vside, &dir.join(&e.id))?;
     }
 
-    let entry = reg.entries.get_mut(&id).expect("checked above");
+    let entry = reg.entries.get_mut(&k).expect("checked above");
     entry.path = dst.to_string_lossy().to_string();
     entry.touched_to = touch_tree(&dst, SystemTime::now())?;
     reg.save()?;
@@ -526,45 +577,48 @@ pub fn restore_retained(id: String) -> Result<String, String> {
 
 /// Drop a session from the registry and delete its vault copy. Called when a
 /// session is deleted for real, so it can't come back as an archived ghost.
-pub(crate) fn forget(jsonl: &Path) {
+pub(crate) fn forget(profile: &str, jsonl: &Path) {
     let id = id_of(jsonl);
     if id.is_empty() {
         return;
     }
     let _guard = lock_registry();
     let mut reg = Registry::load();
-    if let Some(e) = reg.entries.remove(&id) {
-        drop_vault(&e.project_dir, &e.id);
+    if let Some(e) = reg.entries.remove(&key(profile, &id)) {
+        drop_vault(&e.profile, &e.project_dir, &e.id);
         let _ = reg.save();
     }
 }
 
-/// Follow a retained session that just moved to another project folder.
-pub(crate) fn relocate(old: &Path, new: &Path, cwd: &str) {
+/// Follow a retained session that just moved to another project folder or
+/// another Profile: it stays retained at its new place.
+pub(crate) fn relocate(from_profile: &str, to_profile: &str, old: &Path, new: &Path, cwd: &str) {
     let id = id_of(old);
     if id.is_empty() {
         return;
     }
     let _guard = lock_registry();
     let mut reg = Registry::load();
-    let Some(e) = reg.entries.get_mut(&id) else {
+    let Some(mut e) = reg.entries.remove(&key(from_profile, &id)) else {
         return;
     };
-    let old_project_dir = e.project_dir.clone();
+    let (old_profile, old_project_dir) = (e.profile.clone(), e.project_dir.clone());
+    e.profile = to_profile.to_string();
     e.path = new.to_string_lossy().to_string();
     e.project_dir = project_dir_of(new);
     e.cwd = cwd.to_string();
-    // The vault mirrors the project layout, so re-archive under the new folder.
-    if e.project_dir != old_project_dir {
-        drop_vault(&old_project_dir, &id);
+    // The vault mirrors the profile/project layout, so re-archive at the new place.
+    if e.profile != old_profile || e.project_dir != old_project_dir {
+        drop_vault(&old_profile, &old_project_dir, &id);
         e.archived_modified = 0;
     }
-    if archive(new, &e.project_dir, &id).is_ok() {
+    if archive(new, &e.profile, &e.project_dir, &id).is_ok() {
         e.archived_modified = e.real_modified;
     }
     if let Ok(touched) = touch_tree(new, SystemTime::now()) {
         e.touched_to = touched;
     }
+    reg.entries.insert(key(to_profile, &id), e);
     let _ = reg.save();
 }
 

@@ -1,12 +1,14 @@
 import { ref, computed, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { Launcher, Session } from "../types";
+import type { Launcher, Profile, Session } from "../types";
+import { useProfiles } from "./useProfiles";
 
 const STORAGE_LAUNCHERS = "cs.launchers";
 const STORAGE_DEFAULT = "cs.defaultLauncher";
 
-// Presets. Templates use {cwd} and {id}; "run" templates go through `cmd /C`.
+// Presets. Templates use {cwd}, {id} and {configDir} (the session's Profile
+// folder); "run" templates go through `cmd /C`.
 const DEFAULT_LAUNCHERS: Launcher[] = [
   {
     id: "warp",
@@ -68,16 +70,49 @@ watch(defaultLauncherId, (v) => localStorage.setItem(STORAGE_DEFAULT, v));
 const SAFE_ID = /^[A-Za-z0-9_-]+$/;
 const UNSAFE_CWD = /["'`$%&|<>^;!\r\n]/;
 
+const { byId } = useProfiles();
+
+function profileOf(s: Session): Profile | undefined {
+  return byId(s.profile);
+}
+
 /** Plain substitution (for run / clipboard). */
 function fill(template: string, s: Session): string {
-  return template.replaceAll("{cwd}", s.project).replaceAll("{id}", s.id);
+  return template
+    .replaceAll("{cwd}", s.project)
+    .replaceAll("{id}", s.id)
+    .replaceAll("{configDir}", profileOf(s)?.path ?? "");
 }
 
 /** Percent-encoded substitution (for uri). */
 function fillUri(template: string, s: Session): string {
   return template
     .replaceAll("{cwd}", encodeURIComponent(s.project))
-    .replaceAll("{id}", encodeURIComponent(s.id));
+    .replaceAll("{id}", encodeURIComponent(s.id))
+    .replaceAll("{configDir}", encodeURIComponent(profileOf(s)?.path ?? ""));
+}
+
+const IS_WINDOWS = navigator.userAgent.includes("Windows");
+
+/** Shell prefix pointing a pasted `claude` at a Profile (PowerShell on Windows). */
+export const DEFAULT_RESUME_PREFIX = IS_WINDOWS
+  ? "$env:CLAUDE_CONFIG_DIR='{configDir}'; "
+  : "CLAUDE_CONFIG_DIR='{configDir}' ";
+
+/**
+ * A command line to paste somewhere: the Default Profile needs nothing, any
+ * other one gets its prefix so `claude --resume` looks in the right folder.
+ */
+function withProfile(command: string, s: Session): string {
+  const p = profileOf(s);
+  if (!p || p.isDefault) return command;
+  const prefix = (p.resumePrefix || DEFAULT_RESUME_PREFIX).replaceAll("{configDir}", p.path);
+  return prefix + command;
+}
+
+/** The plain resume command for a session, ready to paste. */
+export function resumeCommand(s: Session): string {
+  return withProfile(`claude --resume ${s.id}`, s);
 }
 
 export function useSettings() {
@@ -92,7 +127,7 @@ export function useSettings() {
     const l = launcher ?? defaultLauncher.value;
 
     if (l.kind === "clipboard") {
-      const command = fill(l.template, s);
+      const command = withProfile(fill(l.template, s), s);
       await navigator.clipboard.writeText(command);
       return `Copied  ·  ${command}`;
     }
@@ -103,7 +138,7 @@ export function useSettings() {
       // command via the clipboard when the template doesn't embed {id}.
       if (!l.template.includes("{id}")) {
         try {
-          await navigator.clipboard.writeText(`claude --resume ${s.id}`);
+          await navigator.clipboard.writeText(resumeCommand(s));
         } catch {
           /* clipboard is best-effort */
         }
@@ -115,12 +150,22 @@ export function useSettings() {
     // run — {cwd} and {id} come from the transcript and are pasted verbatim into
     // a `cmd /C` / `sh -c` line, so refuse anything that could break out of the
     // template's quoting and chain another command.
-    if (!SAFE_ID.test(s.id) || UNSAFE_CWD.test(s.project)) {
+    const p = profileOf(s);
+    if (
+      !SAFE_ID.test(s.id) ||
+      UNSAFE_CWD.test(s.project) ||
+      (l.template.includes("{configDir}") && UNSAFE_CWD.test(p?.path ?? ""))
+    ) {
       throw new Error(
         "this session's folder or id has shell characters — use “Copy command” instead",
       );
     }
-    await invoke("run_command", { command: fill(l.template, s), cwd: s.project });
+    // The session's Profile reaches `claude` through CLAUDE_CONFIG_DIR.
+    await invoke("run_command", {
+      command: fill(l.template, s),
+      cwd: s.project,
+      configDir: p && !p.isDefault ? p.path : null,
+    });
     return `${l.label}  ·  ${s.projectName}`;
   }
 

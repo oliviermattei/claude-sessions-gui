@@ -8,6 +8,7 @@ import type { CleanAction } from "./TopBar.vue";
 import { useTheme } from "../composables/useTheme";
 import { useAppVersion } from "../composables/useAppVersion";
 import RetainedIcon from "./RetainedIcon.vue";
+import ProfileSwitcher from "./ProfileSwitcher.vue";
 
 const props = defineProps<{
   sessions: Session[];
@@ -325,6 +326,8 @@ function pickSort(key: SortKey) {
         </div>
       </template>
     </div>
+
+    <ProfileSwitcher />
 
     <div class="footer">
       <span class="ver">{{ version ? `v${version} · local` : "local" }}</span>

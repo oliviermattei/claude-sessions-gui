@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useTheme } from "../composables/useTheme";
 import { useAppVersion } from "../composables/useAppVersion";
+import ProfileSwitcher from "./ProfileSwitcher.vue";
 
 defineProps<{
   projects: { name: string; path: string; count: number }[];
@@ -53,6 +54,8 @@ const { version } = useAppVersion();
         <span class="count">{{ p.count }}</span>
       </button>
     </div>
+
+    <ProfileSwitcher />
 
     <div class="footer">
       <span class="ver">{{ version ? `v${version} · local` : "local" }}</span>

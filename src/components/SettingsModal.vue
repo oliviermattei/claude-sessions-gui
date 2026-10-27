@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { useSettings } from "../composables/useSettings";
+import { useSettings, DEFAULT_RESUME_PREFIX } from "../composables/useSettings";
+import { useProfiles } from "../composables/useProfiles";
+import { SESSION_COLORS, colorHex, colorLabel } from "../lib/colors";
+import type { Profile } from "../types";
 import { useTheme } from "../composables/useTheme";
 import { useRetention } from "../composables/useRetention";
 import { useSessions } from "../composables/useSessions";
@@ -13,19 +16,55 @@ const { launchers, defaultLauncherId, addLauncher, removeLauncher, resetLauncher
 const { accent, theme, layout } = useTheme();
 const { policy } = useRetention();
 const { sessions } = useSessions();
+const { profiles, update: updateProfile, add: addProfile, remove: removeProfile } =
+  useProfiles();
 
 const ACCENTS = ["#d97757", "#8a63d2", "#2a78d6", "#1f8a5b"];
 
-type Section = "appearance" | "launchers" | "retention";
+type Section = "appearance" | "profiles" | "launchers" | "retention";
 const section = ref<Section>("appearance");
 const NAV: { key: Section; label: string }[] = [
   { key: "appearance", label: "Appearance" },
+  { key: "profiles", label: "Profiles" },
   { key: "launchers", label: "Launchers" },
   { key: "retention", label: "Retention" },
 ];
 
 const retainedCount = computed(() => sessions.value.filter((s) => s.retained).length);
 const archivedCount = computed(() => sessions.value.filter((s) => s.archived).length);
+
+const profileError = ref<string | null>(null);
+const newProfilePath = ref("");
+
+async function saveProfile(p: Profile) {
+  profileError.value = null;
+  try {
+    await updateProfile(p);
+  } catch (e) {
+    profileError.value = String(e);
+  }
+}
+
+async function onAddProfile() {
+  const path = newProfilePath.value.trim();
+  if (!path) return;
+  profileError.value = null;
+  try {
+    await addProfile(path);
+    newProfilePath.value = "";
+  } catch (e) {
+    profileError.value = String(e);
+  }
+}
+
+async function onRemoveProfile(p: Profile) {
+  profileError.value = null;
+  try {
+    await removeProfile(p.id);
+  } catch (e) {
+    profileError.value = String(e);
+  }
+}
 
 async function revealVault() {
   if (!policy.value.vault) return;
@@ -107,6 +146,99 @@ async function revealVault() {
             </section>
           </template>
 
+          <!-- PROFILES -->
+          <template v-else-if="section === 'profiles'">
+            <section>
+              <h3>Claude profiles</h3>
+              <p class="hint">
+                Each profile is one Claude Code config folder (what
+                <code>CLAUDE_CONFIG_DIR</code> points to). <code>~/.claude</code> and every
+                <code>~/.claude-*</code> folder holding a <code>projects</code> folder are
+                found automatically; switch between them at the bottom of the sidebar.
+              </p>
+
+              <div v-for="p in profiles" :key="p.id" class="launcher profile-card">
+                <div class="row1">
+                  <select
+                    v-model="p.color"
+                    class="kind color-pick"
+                    :style="{ color: colorHex(p.color) ?? 'var(--dim)' }"
+                    title="Color"
+                    @change="saveProfile(p)"
+                  >
+                    <option :value="null">●  None</option>
+                    <option v-for="c in SESSION_COLORS" :key="c" :value="c">
+                      ●  {{ colorLabel(c) }}
+                    </option>
+                  </select>
+                  <input
+                    class="label-input"
+                    v-model="p.name"
+                    placeholder="Name"
+                    @change="saveProfile(p)"
+                  />
+                  <label v-if="!p.isDefault" class="show" title="Show in the profile switcher">
+                    <input
+                      type="checkbox"
+                      :checked="!p.hidden"
+                      @change="
+                        p.hidden = !($event.target as HTMLInputElement).checked;
+                        saveProfile(p);
+                      "
+                    />
+                    Show
+                  </label>
+                  <button
+                    v-if="p.manual"
+                    class="del"
+                    title="Remove"
+                    @click="onRemoveProfile(p)"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                      <path
+                        d="M3 4.5h10M6.5 4.5V3h3v1.5M5 4.5l.5 8h5l.5-8"
+                        stroke="currentColor"
+                        stroke-width="1.3"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                    </svg>
+                  </button>
+                </div>
+                <p class="hint path">
+                  {{ p.path }}
+                  <span v-if="p.isDefault" class="tag">default</span>
+                  <span v-if="!p.exists" class="tag warn">missing</span>
+                </p>
+                <input
+                  v-if="!p.isDefault"
+                  class="template"
+                  v-model="p.resumePrefix"
+                  :placeholder="DEFAULT_RESUME_PREFIX"
+                  spellcheck="false"
+                  title="Prefix of a copied resume command"
+                  @change="saveProfile(p)"
+                />
+              </div>
+
+              <div class="add-row">
+                <input
+                  class="template"
+                  v-model="newProfilePath"
+                  placeholder="Add another folder, e.g. D:\claude-work"
+                  spellcheck="false"
+                  @keydown.enter="onAddProfile"
+                />
+                <button class="ghost" @click="onAddProfile">+ Add</button>
+              </div>
+              <p v-if="profileError" class="hint error">{{ profileError }}</p>
+              <p class="hint">
+                Copied resume commands of a non-default profile start with its prefix,
+                <code>{configDir}</code> being its folder.
+              </p>
+            </section>
+          </template>
+
           <!-- RETENTION -->
           <template v-else-if="section === 'retention'">
             <section>
@@ -121,8 +253,8 @@ async function revealVault() {
                 }}
                 A session marked <strong>Keep beyond cleanup</strong> stays out of
                 reach: its timestamp is refreshed on every launch of this app, and a
-                copy is mirrored into a vault outside
-                <code>~/.claude/projects</code>.
+                copy is mirrored into a vault outside the profile's
+                <code>projects</code> folder.
               </p>
               <p class="hint">
                 Open this app at least once per period and the session never moves. If
@@ -163,7 +295,9 @@ async function revealVault() {
               </div>
               <p class="hint">
                 The selected launcher runs on <strong>Resume</strong>. Templates support
-                <code>{cwd}</code> and <code>{id}</code>. Kinds:
+                <code>{cwd}</code>, <code>{id}</code> and <code>{configDir}</code> (the
+                session's profile folder; <strong>Run</strong> launchers also get it as
+                <code>CLAUDE_CONFIG_DIR</code>). Kinds:
                 <strong>Run</strong> (shell command), <strong>URI</strong> (e.g.
                 <code>warp://</code>), <strong>Clipboard</strong> (copy only).
               </p>
@@ -467,5 +601,50 @@ section h3 {
 .empty {
   font-size: 12.5px;
   color: var(--faint);
+}
+
+.profile-card .hint.path {
+  margin: 0;
+}
+.color-pick {
+  flex: none;
+  width: 92px;
+}
+.color-pick option {
+  color: var(--tx);
+}
+.show {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--dim);
+  flex: none;
+  cursor: pointer;
+}
+.show input {
+  accent-color: var(--acc);
+}
+.tag {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 5px;
+  border: 1px solid var(--bd2);
+  font-family: inherit;
+  font-size: 10.5px;
+  color: var(--dim);
+}
+.tag.warn,
+.hint.error {
+  color: #e04c3f;
+}
+.add-row {
+  display: flex;
+  gap: 8px;
+  margin: 4px 0 10px;
+}
+.add-row .template {
+  flex: 1;
+  min-width: 0;
 }
 </style>
